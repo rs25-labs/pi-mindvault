@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation } from "./lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed } from "./lib/db.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
 import { buildContext } from "./lib/context.ts";
@@ -112,6 +112,19 @@ function flattenContent(content: unknown): string {
       db.close();
       const text = hits.map((h) => `[${h.id}] ${h.content}`).join("\n") || "(no context)";
       return { content: [{ type: "text" as const, text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_used",
+    label: "Memory Used",
+    description: "Mark recalled memory ids that actually informed the answer. Strengthens their ranking and protects them from decay.",
+    parameters: Type.Object({ ids: Type.Array(Type.Number(), { description: "Observation ids from memory_search that were useful" }) }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
+      const db = getDb();
+      const n = markUsed(db, params.ids);
+      db.close();
+      return { content: [{ type: "text" as const, text: `marked ${n} memory(ies) used` }], details: {} };
     },
   });
 

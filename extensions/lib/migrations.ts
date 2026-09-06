@@ -20,6 +20,12 @@ export const MIGRATIONS: Migration[] = [
       if (!hasColumn(db, "messages", "observed")) db.exec("ALTER TABLE messages ADD COLUMN observed INTEGER NOT NULL DEFAULT 0");
     },
   },
+  {
+    version: 4,
+    up(db) {
+      if (!hasColumn(db, "recall_log", "used_ids_json")) db.exec("ALTER TABLE recall_log ADD COLUMN used_ids_json TEXT");
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce((m, x) => Math.max(m, x.version), 1);

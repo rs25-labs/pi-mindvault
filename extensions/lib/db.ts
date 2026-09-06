@@ -26,7 +26,7 @@ CREATE TRIGGER IF NOT EXISTS obs_fts_update AFTER UPDATE OF content ON observati
 CREATE TABLE IF NOT EXISTS peer_cards(peer_id TEXT NOT NULL, scope_id INTEGER NOT NULL, content TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(peer_id, scope_id));
 CREATE TABLE IF NOT EXISTS summaries(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, peer_id TEXT, kind TEXT NOT NULL, content TEXT NOT NULL, tokens INTEGER, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS queue(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, payload_json TEXT, created_at REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS recall_log(id INTEGER PRIMARY KEY AUTOINCREMENT, query TEXT NOT NULL, scope_id INTEGER, result_ids_json TEXT, scores_json TEXT, hit INTEGER NOT NULL, pi_session_id TEXT, timestamp REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS recall_log(id INTEGER PRIMARY KEY AUTOINCREMENT, query TEXT NOT NULL, scope_id INTEGER, result_ids_json TEXT, scores_json TEXT, used_ids_json TEXT, hit INTEGER NOT NULL, pi_session_id TEXT, timestamp REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_obs_peer_scope ON observations(peer_id, scope_id, mem_type);
 CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, timestamp);
 `;
@@ -185,18 +185,24 @@ export function recallSearch(db: Db, args: { query: string; scopeKeys: string[];
   if (rrf.size === 0) { logRecall(db, args.query, null, [], []); return []; }
   const ids = [...rrf.keys()];
   const meta = db.prepare(
-    `SELECT o.id, o.content, o.importance, o.explicit, o.created_at, s.key AS scopeKey FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE o.id IN (${ids.map(() => "?").join(",")})`
-  ).all(...ids) as { id: number; content: string; importance: number; explicit: number; created_at: number; scopeKey: string }[];
+    `SELECT o.id, o.content, o.importance, o.explicit, o.accesses, o.created_at, s.key AS scopeKey FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE o.id IN (${ids.map(() => "?").join(",")})`
+  ).all(...ids) as { id: number; content: string; importance: number; explicit: number; accesses: number; created_at: number; scopeKey: string }[];
   const now = Date.now() / 1000;
   const ranked = meta
     .map((m) => {
       const r = rrf.get(m.id)!;
       const rec = 1 / (1 + Math.max(0, now - m.created_at) / 86400);
-      const score = 0.6 * r.rrf + 0.25 * rec + 0.15 * Math.min(1, Math.max(0, m.importance)) + (m.explicit ? 0.1 : 0);
+      const score = 0.6 * r.rrf + 0.25 * rec + 0.15 * Math.min(1, Math.max(0, m.importance)) + (m.explicit ? 0.1 : 0) + 0.05 * Math.min(1, m.accesses / 10);
       return { id: m.id, content: m.content, score, source: r.sources.sort().join("+") || "rrf", scopeKey: m.scopeKey };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+  if (ranked.length > 0) {
+    try {
+      const rids = ranked.map((r) => r.id);
+      db.prepare(`UPDATE observations SET accesses=accesses+1 WHERE id IN (${rids.map(() => "?").join(",")})`).run(...rids);
+    } catch { /* access accounting never blocks recall */ }
+  }
   logRecall(db, args.query, null, ranked.map((r) => r.id), ranked.map((r) => r.score));
   return ranked;
 }
@@ -204,6 +210,17 @@ export function recallSearch(db: Db, args: { query: string; scopeKeys: string[];
 function logRecall(db: Db, query: string, scopeIdV: number | null, ids: number[], scores: number[]): void {
   db.prepare("INSERT INTO recall_log(query,scope_id,result_ids_json,scores_json,hit,pi_session_id,timestamp) VALUES(?,?,?,?,?,?,?)")
     .run(query, scopeIdV, JSON.stringify(ids), JSON.stringify(scores), ids.length > 0 ? 1 : 0, null, Date.now() / 1000);
+}
+
+export function markUsed(db: Db, ids: number[]): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(",");
+  const r = db.prepare(`UPDATE observations SET accesses=accesses+1 WHERE id IN (${placeholders})`).run(...ids) as { changes: number | bigint };
+  try {
+    const last = db.prepare("SELECT id FROM recall_log ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+    if (last) db.prepare("UPDATE recall_log SET used_ids_json=? WHERE id=?").run(JSON.stringify(ids), last.id);
+  } catch { /* feedback logging never blocks */ }
+  return Number(r.changes);
 }
 
 export function getProfile(db: Db, args: { peer: string; scopeKeys: string[] }): string[] {
