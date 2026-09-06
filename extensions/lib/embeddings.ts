@@ -12,21 +12,25 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   return dot; // inputs are L2-normalized
 }
 
+export function featureHash(text: string, dim: number): Float32Array {
+  const v = new Float32Array(dim);
+  const toks = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (let i = 0; i < toks.length; i++) {
+    v[fnv1a(toks[i]) % dim] += 1;
+    if (i > 0) v[fnv1a(toks[i - 1] + " " + toks[i]) % dim] += 0.5;
+  }
+  let n = 0;
+  for (let i = 0; i < v.length; i++) n += v[i] * v[i];
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < v.length; i++) v[i] /= n;
+  return v;
+}
+
 export class FeatureHashEmbedder implements Embedder {
   readonly name = "feature-hash";
   constructor(readonly dim = 256) {}
   async embed(text: string): Promise<Float32Array> {
-    const v = new Float32Array(this.dim);
-    const toks = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    for (let i = 0; i < toks.length; i++) {
-      v[fnv1a(toks[i]) % this.dim] += 1;
-      if (i > 0) v[fnv1a(toks[i - 1] + " " + toks[i]) % this.dim] += 0.5;
-    }
-    let n = 0;
-    for (let i = 0; i < v.length; i++) n += v[i] * v[i];
-    n = Math.sqrt(n) || 1;
-    for (let i = 0; i < v.length; i++) v[i] /= n;
-    return v;
+    return featureHash(text, this.dim);
   }
 }
 
