@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus } from "./lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation } from "./lib/db.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 
 function dbPath(): string {
@@ -95,6 +95,19 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "memory_forget",
+    label: "Memory Forget",
+    description: "Hard-delete one memory by id (purges FTS + vector). Use for corrections and privacy.",
+    parameters: Type.Object({ id: Type.Number({ description: "Observation id from memory_search" }) }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
+      const db = getDb();
+      const ok = forgetObservation(db, params.id);
+      db.close();
+      return { content: [{ type: "text" as const, text: ok ? `forgot #${params.id}` : `not found #${params.id}` }], details: {} };
+    },
+  });
+
   pi.registerCommand("mindvault-setup", {
     description: "Initialize local mindvault DB",
     handler: async (_args, ctx) => {
@@ -111,7 +124,7 @@ export default function (pi: ExtensionAPI) {
       const db = getDb();
       const st = dbStatus(db);
       db.close();
-      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}`, "info");
+      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending} vec=${st.vecMode} dim=${st.embeddingDim ?? "?"}`, "info");
     },
   });
 }
