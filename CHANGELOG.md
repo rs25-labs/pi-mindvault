@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 — 2026-09-06
+- Security: redact auto-capture path (ingest + derive), DB file 0600 / dir 0700,
+  `files` allowlist, pinned peer deps, Node >=22.5 floor
+
 ## 0.1.1 — 2026-09-06
 - Gallery preview image (`preview.png` + `pi.image` metadata)
 
