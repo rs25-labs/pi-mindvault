@@ -14,12 +14,31 @@ function signalImportance(sentence: string): number {
   return Math.min(1, Math.round(s * 100) / 100);
 }
 
+const CODE_FENCE = /```[\s\S]*?```/g;
+const CHUNK_TARGET = 400;
+const CHUNK_MAX = 800;
+const CODE_MAX = 1500;
+
 function splitSentences(text: string): string[] {
-  return text
-    .replace(/```[\s\S]*?```/g, (m) => " " + m.slice(0, 200))
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 24 && s.length < 600);
+  return text.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function chunkMessage(text: string): string[] {
+  const fences: string[] = [];
+  const prose = text.replace(CODE_FENCE, (m) => { fences.push(m.length > CODE_MAX ? m.slice(0, CODE_MAX) : m); return "\n"; });
+  const sents = splitSentences(prose).filter((s) => s.length >= 8);
+  const groups: string[] = [];
+  let i = 0;
+  while (i < sents.length) {
+    let chunk = sents[i];
+    let j = i + 1;
+    while (j < sents.length && chunk.length + 1 + sents[j].length <= CHUNK_TARGET) { chunk += " " + sents[j]; j++; }
+    groups.push(chunk);
+    i = (j > i + 1 && j < sents.length) ? j - 1 : j; // 1-sentence overlap between multi-sentence chunks
+  }
+  const keepFences = fences.map((f) => f.trim()).filter((f) => f.length > 24 && f.length <= CODE_MAX);
+  const keepGroups = groups.map((c) => c.trim()).filter((c) => c.length > 24 && c.length <= CHUNK_MAX);
+  return [...keepFences, ...keepGroups];
 }
 
 function scopeIdOf(db: Db, scopeKey: string): number {
@@ -80,7 +99,7 @@ function deriveMessage(db: Db, p: { messageId: number; cwd: string; peer: string
   const repo = gitRootSync(p.cwd);
   const scope = resolveScope({ cwd: p.cwd, repoRoot: repo, explicit: null });
   const sid = scopeIdOf(db, scope.key);
-  const sents = splitSentences(msg.content).slice(0, 8);
+  const sents = chunkMessage(msg.content).slice(0, 12);
   const now = Date.now() / 1000;
   for (const s of sents) {
     const clean = redact(s, { cwd: p.cwd });
