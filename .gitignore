@@ -12,3 +12,6 @@ worktrees/
 
 # OS
 .DS_Store
+
+# local audit handoff (never commit or publish)
+AUDIT-SPEC.md
