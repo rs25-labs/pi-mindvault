@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { redact } from "./redact.ts";
 import { loadVecExtension, vecMode } from "./vec.ts";
 import { defaultEmbedder, featureHash } from "./embeddings.ts";
+import { runMigrations } from "./migrations.ts";
 
 export type Db = DatabaseSync;
 export type MemType = "episodic" | "semantic" | "procedural" | "working";
@@ -34,23 +35,12 @@ export function openMindvault(path: string): Db {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path, { allowLoadExtension: true } as unknown as Record<string, unknown>);
   try { chmodSync(path, 0o600); } catch { /* best-effort; never block open */ }
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+  db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
   db.exec(SCHEMA);
-  const v = db.prepare("SELECT value FROM state_meta WHERE key='schema_version'").get() as { value?: string } | undefined;
-  if (!v) db.prepare("INSERT INTO state_meta(key,value) VALUES('schema_version','1')").run();
+  runMigrations(db);
   db.prepare("INSERT OR IGNORE INTO workspaces(id,config_json) VALUES('pi','{}')").run();
-  // M2 reconcile: embedding column (M1 DBs lack it)
-  try {
-    const cols = db.prepare(`PRAGMA table_info(observations)`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === "embedding")) db.exec(`ALTER TABLE observations ADD COLUMN embedding BLOB`);
-  } catch { /* fresh schema already includes it */ }
   loadVecExtension(db);
   ensureEmbeddingDim(db);
-  // M3 reconcile: observed flag (M1/M2 DBs lack it)
-  try {
-    const mcols = db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
-    if (!mcols.some((c) => c.name === "observed")) db.exec(`ALTER TABLE messages ADD COLUMN observed INTEGER NOT NULL DEFAULT 0`);
-  } catch { /* fresh schema already includes it */ }
   backfillEmbeddings(db);
   return db;
 }
