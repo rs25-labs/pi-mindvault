@@ -53,3 +53,8 @@ M1 schema+tools → M2 vector+scopes → M3 async+inject → M4 optimize+publish
 
 ## Privacy
 Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside-cwd>`. Delete anytime. Docs/commits never contain absolute paths or usernames (`~/.pi`, `<user>` only).
+
+## M1 scope (this plan)
+- FTS5-only search (no vectors yet — M2 adds `sqlite-vec` + RRF).
+- `memory_context` is extractive in M1; LLM synthesis lands in M3.
+- Queue table exists for M3 workers; M1 writes synchronously.
