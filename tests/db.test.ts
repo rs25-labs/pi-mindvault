@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMindvault, remember, recallSearch, getProfile, dbStatus } from "../extensions/lib/db.ts";
@@ -34,6 +34,13 @@ test("explicit never pruned placeholder + status", () => {
   const db = openMindvault(path);
   const st = dbStatus(db);
   assert.equal(st.schemaVersion, 1);
+  db.close();
+});
+
+test("db file is created with 0600 permissions", { skip: process.platform === "win32" }, () => {
+  const path = tmpDb();
+  const db = openMindvault(path);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
   db.close();
 });
 

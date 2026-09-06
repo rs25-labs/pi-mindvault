@@ -2,6 +2,7 @@ import type { Db } from "./db.ts";
 import { resolveScope, gitRootSync } from "./scopes.ts";
 import { featureHash, defaultEmbedder } from "./embeddings.ts";
 import { vecMode } from "./vec.ts";
+import { redact } from "./redact.ts";
 
 export interface IngestArgs { sessionId: string; peer: string; role: string; content: string; cwd: string; tokenCount?: number }
 
@@ -42,7 +43,7 @@ export function ingestMessage(db: Db, args: IngestArgs): number {
     .run(args.sessionId, "pi", args.cwd, Date.now() / 1000);
   db.prepare("INSERT OR IGNORE INTO session_peers(session_id,peer_id) VALUES(?,?)").run(args.sessionId, args.peer);
   const r = db.prepare("INSERT INTO messages(session_id,peer_id,role,content,timestamp,token_count,observed) VALUES(?,?,?,?,?,?,0)")
-    .run(args.sessionId, args.peer, args.role, args.content, Date.now() / 1000, args.tokenCount ?? null) as { lastInsertRowid: number | bigint };
+    .run(args.sessionId, args.peer, args.role, redact(args.content, { cwd: args.cwd }), Date.now() / 1000, args.tokenCount ?? null) as { lastInsertRowid: number | bigint };
   const mid = Number(r.lastInsertRowid);
   db.prepare("INSERT INTO queue(session_id,status,attempts,payload_json,created_at) VALUES(?, 'pending', 0, ?, ?)")
     .run(args.sessionId, JSON.stringify({ messageId: mid, cwd: args.cwd, peer: args.peer }), Date.now() / 1000);
@@ -81,10 +82,11 @@ function deriveMessage(db: Db, p: { messageId: number; cwd: string; peer: string
   const sents = splitSentences(msg.content).slice(0, 8);
   const now = Date.now() / 1000;
   for (const s of sents) {
+    const clean = redact(s, { cwd: p.cwd });
     const r = db.prepare("INSERT INTO observations(workspace_id,peer_id,session_id,scope_id,mem_type,content,importance,explicit,accesses,created_at,updated_at) VALUES('pi',?,?,?,?,?,?,0,0,?,?)").run(
-      p.peer, msg.session_id, sid, "episodic", s, signalImportance(s), now, now,
+      p.peer, msg.session_id, sid, "episodic", clean, signalImportance(clean), now, now,
     ) as { lastInsertRowid: number | bigint };
-    embedRow(db, Number(r.lastInsertRowid), s);
+    embedRow(db, Number(r.lastInsertRowid), clean);
   }
   db.prepare("UPDATE messages SET observed=1 WHERE id=?").run(p.messageId);
 }

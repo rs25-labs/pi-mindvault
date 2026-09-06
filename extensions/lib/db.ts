@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { redact } from "./redact.ts";
 import { loadVecExtension, vecMode } from "./vec.ts";
@@ -31,8 +31,9 @@ CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, timestamp);
 `;
 
 export function openMindvault(path: string): Db {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path, { allowLoadExtension: true } as unknown as Record<string, unknown>);
+  try { chmodSync(path, 0o600); } catch { /* best-effort; never block open */ }
   db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
   db.exec(SCHEMA);
   const v = db.prepare("SELECT value FROM state_meta WHERE key='schema_version'").get() as { value?: string } | undefined;
