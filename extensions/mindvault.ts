@@ -7,7 +7,7 @@ import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
 import { buildContext } from "./lib/context.ts";
 import { optimizeNow } from "./lib/maint.ts";
-import { dream } from "./lib/dreamer.ts";
+import { dream, pruneIfOverCap } from "./lib/dreamer.ts";
 import { deleteScope } from "./lib/db.ts";
 
 function dbPath(): string {
@@ -62,6 +62,7 @@ export default function (pi: ExtensionAPI) {
         if (added >= 10) break;
       }
       if (added > 0) drainQueue(db, { limit: 20 });
+      pruneIfOverCap(db);
       db.close();
     } catch { /* sync never breaks the agent loop */ }
   });

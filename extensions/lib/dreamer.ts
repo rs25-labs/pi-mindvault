@@ -17,10 +17,15 @@ function cos(a: Float32Array, b: Float32Array): number {
   return d;
 }
 
+export function maxObs(): number {
+  const n = Number(process.env.MINDVAULT_MAX_OBS ?? "50000");
+  return Number.isFinite(n) && n > 0 ? n : 50000;
+}
+
 export function dream(db: Db, _opts: Record<string, never>): DreamStats {
   const stats: DreamStats = { merged: 0, pruned: 0, cards: 0 };
   stats.merged = mergeDupes(db);
-  stats.pruned = decayStale(db);
+  stats.pruned = decayStale(db) + enforceCap(db, maxObs());
   stats.cards = refreshCards(db);
   db.prepare("INSERT INTO state_meta(key,value) VALUES('last_dream',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     .run(String(Date.now() / 1000));
@@ -80,6 +85,25 @@ function decayStale(db: Db, nowSeconds = Date.now() / 1000): number {
   // global scope exempt (identity facts); procedural exempt by type (not episodic)
   for (const r of stale) deleteObservationRow(db, r.id);
   return stale.length;
+}
+
+function enforceCap(db: Db, cap: number, limit = 1000): number {
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM observations").get() as { n: number }).n;
+  if (total <= cap) return 0;
+  const excess = Math.min(total - cap, limit);
+  const rows = db.prepare(
+    `SELECT o.id FROM observations o WHERE o.explicit=0 AND o.scope_id NOT IN (SELECT s.id FROM scopes s WHERE s.key='global')
+     ORDER BY o.accesses ASC, o.importance ASC, o.created_at ASC LIMIT ?`
+  ).all(excess) as { id: number }[];
+  for (const r of rows) deleteObservationRow(db, r.id);
+  return rows.length;
+}
+
+export function pruneIfOverCap(db: Db): number {
+  const cap = maxObs();
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM observations").get() as { n: number }).n;
+  if (total <= cap) return 0;
+  return enforceCap(db, cap);
 }
 
 function refreshCards(db: Db): number {
