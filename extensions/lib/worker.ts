@@ -1,6 +1,6 @@
 import type { Db } from "./db.ts";
 import { resolveScope, gitRootSync } from "./scopes.ts";
-import { featureHash, defaultEmbedder } from "./embeddings.ts";
+import { featureHash, activeEmbedder, isAsyncProvider } from "./embeddings.ts";
 import { vecMode } from "./vec.ts";
 import { redact } from "./redact.ts";
 
@@ -29,8 +29,9 @@ function scopeIdOf(db: Db, scopeKey: string): number {
 }
 
 function embedRow(db: Db, id: number, content: string): void {
+  if (isAsyncProvider()) return; // real providers fill NULL rows via embedUpgrade
   try {
-    const v = Buffer.from(featureHash(content, defaultEmbedder().dim).buffer);
+    const v = Buffer.from(featureHash(content, activeEmbedder().dim).buffer);
     db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, id);
     if (vecMode(db) === "vec0") {
       try { db.prepare("INSERT INTO vec_observations(rowid, embedding) VALUES(?,?)").run(id, v); } catch { /* js covers */ }

@@ -43,6 +43,17 @@ Tools (for agents):
 
 Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`).
 
+## Embeddings
+Recall quality depends on the embedding provider, selected with `MINDVAULT_EMBEDDINGS_PROVIDER`:
+
+| Provider | Footprint | Private | Notes |
+|----------|-----------|---------|-------|
+| `hash` (default) | none, bundled | yes | zero-dependency feature-hash; lexical, offline |
+| `local` | model (~23MB+) downloaded on first use; runtime is an optional dependency | yes | best recall, offline; set `MINDVAULT_EMBEDDINGS_MODEL` |
+| `api` | none | no (leaves the machine) | set `MINDVAULT_EMBEDDINGS_URL` (https), `_KEY`, `_MODEL`, `_DIM` |
+
+`local` uses `fastembed` (declared under `optionalDependencies`, so a default install pulls nothing extra). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+
 ## How it works
 - Hermes pattern: single sqlite, WAL, FTS5 external-content + triggers, chunked rebuild, fail-open detach.
 - Honcho pattern: `workspace > peers <> sessions > messages`, async Deriver (explicit+deductive) + Dreamer (consolidate, peer cards, session summaries 40/60), RRF `0.6*vector+FTS +0.25*recency+0.15*importance`, scopes filter.

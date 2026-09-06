@@ -2,7 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed } from "./lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade } from "./lib/db.ts";
+import { embed, isAsyncProvider } from "./lib/embeddings.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
 import { buildContext } from "./lib/context.ts";
@@ -62,6 +63,7 @@ export default function (pi: ExtensionAPI) {
         if (added >= 10) break;
       }
       if (added > 0) drainQueue(db, { limit: 20 });
+      if (isAsyncProvider()) await embedUpgrade(db, 50);
       pruneIfOverCap(db);
       db.close();
     } catch { /* sync never breaks the agent loop */ }
@@ -95,7 +97,8 @@ function flattenContent(content: unknown): string {
     parameters: Type.Object({ query: Type.String({ description: "Search query" }), limit: Type.Optional(Type.Number()) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const db = getDb();
-      const hits = recallSearch(db, { query: params.query, scopeKeys: ctxScopes(ctx.cwd), limit: params.limit ?? 5 });
+      const queryVector = isAsyncProvider() ? await embed(params.query) : undefined;
+      const hits = recallSearch(db, { query: params.query, scopeKeys: ctxScopes(ctx.cwd), limit: params.limit ?? 5, queryVector });
       db.close();
       const text = hits.map((h) => `[${h.id}] (${h.source} ${h.scopeKey}) ${h.content}`).join("\n") || "(no hits)";
       return { content: [{ type: "text" as const, text }], details: {} };
@@ -109,7 +112,8 @@ function flattenContent(content: unknown): string {
     parameters: Type.Object({ query: Type.String({ description: "Question about memory" }) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const db = getDb();
-      const hits = recallSearch(db, { query: params.query, scopeKeys: ctxScopes(ctx.cwd), limit: 8 });
+      const queryVector = isAsyncProvider() ? await embed(params.query) : undefined;
+      const hits = recallSearch(db, { query: params.query, scopeKeys: ctxScopes(ctx.cwd), limit: 8, queryVector });
       db.close();
       const text = hits.map((h) => `[${h.id}] ${h.content}`).join("\n") || "(no context)";
       return { content: [{ type: "text" as const, text }], details: {} };
@@ -143,6 +147,7 @@ function flattenContent(content: unknown): string {
       const repo = gitRootSync(ctx.cwd);
       const scope = resolveScope({ cwd: ctx.cwd, repoRoot: repo, explicit: params.global ? "global" : null });
       const id = remember(db, { peer: "user", content: params.content, memType: params.memType ?? "semantic", scopeKey: scope.key, explicit: 1, cwd: ctx.cwd });
+      if (isAsyncProvider()) await embedUpgrade(db);
       db.close();
       return { content: [{ type: "text" as const, text: `remembered #${id} in ${scope.key}` }], details: {} };
     },
@@ -169,6 +174,7 @@ function flattenContent(content: unknown): string {
     async execute(_id, _params, _signal, _onUpdate, _ctx) {
       const db = getDb();
       const rep = optimizeNow(db, {});
+      if (isAsyncProvider()) await embedUpgrade(db, 2000);
       db.close();
       return { content: [{ type: "text" as const, text: `optimize: checkpoint=${rep.checkpoint} fts=${rep.ftsRebuild} backfilled=${rep.backfilled} merged=${rep.dreamed.merged} pruned=${rep.dreamed.pruned}+${rep.prunedExpired} vacuum=${rep.vacuum}` }], details: {} };
     },

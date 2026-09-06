@@ -1,6 +1,7 @@
 import type { Db } from "./db.ts";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { activeEmbedder } from "./embeddings.ts";
 
 export type VecMode = "vec0" | "js";
 
@@ -20,7 +21,7 @@ export function loadVecExtension(db: Db): VecMode {
   if (path) {
     try {
       (db as unknown as { loadExtension(p: string): void }).loadExtension(path);
-      db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_observations USING vec0(embedding FLOAT[256])`);
+      db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_observations USING vec0(embedding FLOAT[${activeEmbedder().dim}])`);
       recordMode(db, "vec0");
       return "vec0";
     } catch {
