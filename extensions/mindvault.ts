@@ -6,6 +6,9 @@ import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObse
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
 import { buildContext } from "./lib/context.ts";
+import { optimizeNow } from "./lib/maint.ts";
+import { dream } from "./lib/dreamer.ts";
+import { deleteScope } from "./lib/db.ts";
 
 function dbPath(): string {
   return join(homedir(), ".pi", "memory", "memory.db");
@@ -144,6 +147,41 @@ function flattenContent(content: unknown): string {
     },
   });
 
+  pi.registerTool({
+    name: "memory_optimize",
+    label: "Memory Optimize",
+    description: "Run maintenance: checkpoint, FTS rebuild, embedding backfill, Dreamer pass, expiry prune, vacuum. Slow on large DBs.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, _ctx) {
+      const db = getDb();
+      const rep = optimizeNow(db, {});
+      db.close();
+      return { content: [{ type: "text" as const, text: `optimize: checkpoint=${rep.checkpoint} fts=${rep.ftsRebuild} backfilled=${rep.backfilled} merged=${rep.dreamed.merged} pruned=${rep.dreamed.pruned}+${rep.prunedExpired} vacuum=${rep.vacuum}` }], details: {} };
+    },
+  });
+
+  pi.registerCommand("dream", {
+    description: "Run Dreamer consolidation (dedupe, decay, card refresh)",
+    handler: async (_args, ctx) => {
+      const db = getDb();
+      const s = dream(db, {});
+      db.close();
+      ctx.ui.notify(`dream: merged=${s.merged} pruned=${s.pruned} cards=${s.cards}`, "info");
+    },
+  });
+
+  pi.registerCommand("memory-prune", {
+    description: "Delete one scope (e.g. memory-prune dir:/tmp/scratch)",
+    handler: async (args, ctx) => {
+      const scope = String(args ?? "").trim();
+      if (!scope) { ctx.ui.notify("usage: memory-prune <scopeKey> (e.g. global, dir:/path)", "error"); return; }
+      const db = getDb();
+      const n = deleteScope(db, scope);
+      db.close();
+      ctx.ui.notify(`pruned ${n} memories from ${scope}`, "info");
+    },
+  });
+
   pi.registerCommand("mindvault-setup", {
     description: "Initialize local mindvault DB",
     handler: async (_args, ctx) => {
@@ -161,7 +199,12 @@ function flattenContent(content: unknown): string {
       const st = dbStatus(db);
       db.close();
       const q = queueStatus(db);
-      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} dim=${st.embeddingDim ?? "?"}`, "info");
+      let hit = "(no queries yet)";
+      try {
+        const r = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(hit),0) AS h FROM recall_log").get() as { n: number; h: number };
+        if (r.n > 0) hit = `${Math.round((r.h / r.n) * 100)}% of ${r.n}`;
+      } catch { /* ignore */ }
+      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} dim=${st.embeddingDim ?? "?"} recall-hit=${hit}`, "info");
     },
   });
 }
