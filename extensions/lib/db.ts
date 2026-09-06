@@ -149,6 +149,61 @@ export function remember(db: Db, args: { peer: string; content: string; memType:
   return id;
 }
 
+export interface Explanation {
+  id: number; content: string; scopeKey: string; memType: string; importance: number;
+  explicit: number; accesses: number; createdAt: number; updatedAt: number;
+  supersedes: number[]; lastRecall: { query: string; score: number | null; used: boolean } | null;
+}
+
+export function explainObservation(db: Db, id: number): Explanation | null {
+  const row = db.prepare(
+    `SELECT o.id, o.content, s.key AS scopeKey, o.mem_type, o.importance, o.explicit, o.accesses, o.created_at, o.updated_at, o.supersedes_id
+     FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE o.id=?`
+  ).get(id) as { id: number; content: string; scopeKey: string; mem_type: string; importance: number; explicit: number; accesses: number; created_at: number; updated_at: number; supersedes_id: number | null } | undefined;
+  if (!row) return null;
+  const supersedes: number[] = [];
+  const seen = new Set<number>();
+  let sup = row.supersedes_id;
+  while (sup && !seen.has(sup)) {
+    supersedes.push(sup);
+    seen.add(sup);
+    const next = db.prepare("SELECT supersedes_id FROM observations WHERE id=?").get(sup) as { supersedes_id: number | null } | undefined;
+    sup = next?.supersedes_id ?? null;
+  }
+  const logs = db.prepare("SELECT query, result_ids_json, scores_json, used_ids_json FROM recall_log ORDER BY id DESC LIMIT 50").all() as { query: string; result_ids_json: string | null; scores_json: string | null; used_ids_json: string | null }[];
+  let lastRecall: Explanation["lastRecall"] = null;
+  for (const l of logs) {
+    const ids = JSON.parse(l.result_ids_json ?? "[]") as number[];
+    const k = ids.indexOf(id);
+    if (k >= 0) {
+      const scores = JSON.parse(l.scores_json ?? "[]") as number[];
+      const used = JSON.parse(l.used_ids_json ?? "[]") as number[];
+      lastRecall = { query: l.query, score: scores[k] ?? null, used: used.includes(id) };
+      break;
+    }
+  }
+  return { id: row.id, content: row.content, scopeKey: row.scopeKey, memType: row.mem_type, importance: row.importance, explicit: row.explicit, accesses: row.accesses, createdAt: row.created_at, updatedAt: row.updated_at, supersedes, lastRecall };
+}
+
+export function editObservation(db: Db, args: { id: number; content: string; cwd: string }): boolean {
+  const clean = redact(args.content, { cwd: args.cwd });
+  const now = Date.now() / 1000;
+  const r = db.prepare("UPDATE observations SET content=?, updated_at=? WHERE id=?").run(clean, now, args.id) as { changes: number | bigint };
+  if (Number(r.changes) === 0) return false;
+  if (!isAsyncProvider()) {
+    try {
+      const v = toBlob(featureHash(clean, activeEmbedder().dim));
+      db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, args.id);
+      if (vecMode(db) === "vec0") {
+        try { db.prepare("INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES(?,?)").run(args.id, v); } catch { /* js fallback covers */ }
+      }
+    } catch { /* embedding never blocks an edit */ }
+  } else {
+    db.prepare("UPDATE observations SET embedding=NULL WHERE id=?").run(args.id); // embedUpgrade re-fills
+  }
+  return true;
+}
+
 export interface Hit { id: number; content: string; score: number; source: string; scopeKey: string }
 
 export function recallSearch(db: Db, args: { query: string; scopeKeys: string[]; limit?: number; queryVector?: Float32Array }): Hit[] {
