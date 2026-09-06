@@ -63,3 +63,8 @@ Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside
 - RRF hybrid recall (`vec` + FTS5, recency/importance/explicit rerank); `vec0` when the native extension loads, JS cosine scan otherwise.
 - Embeddings pluggable: zero-dep feature-hash default; set `MINDVAULT_EMBEDDINGS_URL/KEY/MODEL/DIM` for API embeddings.
 - `memory_forget` + scope delete (session delete lands in M3 with workers).
+
+## M3 scope
+- Async ingest: turns buffered to `messages` + queue; heuristic Deriver (no LLM) extracts `episodic` facts; poison jobs fail after 3 attempts.
+- Extractive session summaries + 40/60 budgeted prompt context; post-turn auto-sync (bounded, best-effort).
+- Session lifecycle helpers + cascade delete. LLM-backed Deriver/Dreamer stay M4.

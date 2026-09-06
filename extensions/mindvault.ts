@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation } from "./lib/db.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
+import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
+import { buildContext } from "./lib/context.ts";
 
 function dbPath(): string {
   return join(homedir(), ".pi", "memory", "memory.db");
@@ -28,12 +30,46 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     try {
       const db = getDb();
-      const cards = getProfile(db, { peer: "user", scopeKeys: ctxScopes(ctx.cwd) });
+      const repo = gitRootSync(ctx.cwd);
+      const built = buildContext(db, { cwd: ctx.cwd, repoRoot: repo, tokenBudget: 2000 });
       db.close();
-      if (cards.length === 0) return;
-      return { systemPrompt: event.systemPrompt + "\n\n# Long-term memory (pi-mindvault)\n" + cards.join("\n").slice(0, 3000) };
+      if (!built.text.trim()) return;
+      return { systemPrompt: event.systemPrompt + "\n\n" + built.text };
     } catch { return; }
   });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    // best-effort post-turn sync: ingest unseen entries, bounded drain (never blocks shutdown)
+    try {
+      const db = getDb();
+      const sessionId = ctx.sessionManager.getSessionFile() ?? `cwd:${ctx.cwd}`;
+      // dedupe on content prefix: ingested rows carry ingest-time stamps, so entry
+      // timestamps can never match — content is the stable key within a session.
+      const known = new Set((db.prepare("SELECT content FROM messages WHERE session_id=?").all(sessionId) as { content: string }[]).map((r) => String(r.content).slice(0, 80)));
+      const entries = ctx.sessionManager.getEntries();
+      let added = 0;
+      for (const e of entries.slice(-30)) {
+        if (e.type !== "message" || !("content" in e.message)) continue;
+        const role = (e.message as { role: string }).role;
+        const text = flattenContent(e.message.content);
+        if (!text || text.length < 24) continue;
+        if (known.has(text.slice(0, 80))) continue;
+        ingestMessage(db, { sessionId, peer: role === "assistant" ? "pi-agent" : "user", role: role === "assistant" ? "assistant" : role === "user" ? "user" : "tool", content: text, cwd: ctx.cwd });
+        added++;
+        if (added >= 10) break;
+      }
+      if (added > 0) drainQueue(db, { limit: 20 });
+      db.close();
+    } catch { /* sync never breaks the agent loop */ }
+  });
+
+function flattenContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((b) => (b && typeof b === "object" && "text" in (b as Record<string, unknown>) ? String((b as Record<string, unknown>).text) : "")).join("\n");
+  }
+  return "";
+}
 
   pi.registerTool({
     name: "memory_profile",
@@ -124,7 +160,8 @@ export default function (pi: ExtensionAPI) {
       const db = getDb();
       const st = dbStatus(db);
       db.close();
-      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending} vec=${st.vecMode} dim=${st.embeddingDim ?? "?"}`, "info");
+      const q = queueStatus(db);
+      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} dim=${st.embeddingDim ?? "?"}`, "info");
     },
   });
 }
