@@ -58,3 +58,8 @@ Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside
 - FTS5-only search (no vectors yet — M2 adds `sqlite-vec` + RRF).
 - `memory_context` is extractive in M1; LLM synthesis lands in M3.
 - Queue table exists for M3 workers; M1 writes synchronously.
+
+## M2 scope
+- RRF hybrid recall (`vec` + FTS5, recency/importance/explicit rerank); `vec0` when the native extension loads, JS cosine scan otherwise.
+- Embeddings pluggable: zero-dep feature-hash default; set `MINDVAULT_EMBEDDINGS_URL/KEY/MODEL/DIM` for API embeddings.
+- `memory_forget` + scope delete (session delete lands in M3 with workers).
