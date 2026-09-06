@@ -68,3 +68,14 @@ Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside
 - Async ingest: turns buffered to `messages` + queue; heuristic Deriver (no LLM) extracts `episodic` facts; poison jobs fail after 3 attempts.
 - Extractive session summaries + 40/60 budgeted prompt context; post-turn auto-sync (bounded, best-effort).
 - Session lifecycle helpers + cascade delete. LLM-backed Deriver/Dreamer stay M4.
+
+## Maintain
+- `memory_optimize` tool (or run `dream` / `memory-prune <scope>` commands): checkpoint + FTS rebuild + backfill + Dreamer + expiry prune + vacuum. Slow on large DBs — run idle.
+- `/memory` shows recall hit-rate (`recall-hit=82% of 50`) to tune thresholds.
+- Explicit memories and `global` identity facts never decay; everything else follows the 30-day low-importance episodic policy.
+
+## Install for real
+```bash
+pi install npm:@rs25-labs/pi-mindvault
+```
+Then `/mindvault-setup` inside pi. Requires pi with extension support and Node 22+.
