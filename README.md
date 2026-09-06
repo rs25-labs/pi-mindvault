@@ -79,3 +79,11 @@ Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside
 pi install npm:@rs25-labs/pi-mindvault
 ```
 Then `/mindvault-setup` inside pi. Requires pi with extension support and Node 22+.
+
+## Releasing (maintainers)
+First publish must be manual (tokens/CLI cannot complete it): publish `0.1.0` publicly
+via staged publish + browser approval. Only then does the package get a Settings page.
+Trusted Publisher (OIDC) is configured on the *package* Settings page — not account
+settings, which has no such option. Add repo `rs25-labs/pi-mindvault`, workflow
+`publish.yml`. After that, every release is just a `v*` tag; the Action tests,
+typechecks, and publishes with provenance. No tokens involved.
