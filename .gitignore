@@ -21,3 +21,6 @@ cache/
 # worktrees (local isolation, never commit)
 .worktrees/
 worktrees/
+node_modules/
+dist/
+*.tsbuildinfo
