@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade } from "./lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade, explainObservation, editObservation } from "./lib/db.ts";
 import { embed, isAsyncProvider } from "./lib/embeddings.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
@@ -150,6 +150,57 @@ function flattenContent(content: unknown): string {
       if (isAsyncProvider()) await embedUpgrade(db);
       db.close();
       return { content: [{ type: "text" as const, text: `remembered #${id} in ${scope.key}` }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_why",
+    label: "Memory Why",
+    description: "Explain one memory: scope, type, importance, access count, supersede chain, and how it scored in the last recall that returned it.",
+    parameters: Type.Object({ id: Type.Number({ description: "Observation id from memory_search" }) }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
+      const db = getDb();
+      const ex = explainObservation(db, params.id);
+      db.close();
+      if (!ex) return { content: [{ type: "text" as const, text: `not found #${params.id}` }], details: {} };
+      const lr = ex.lastRecall ? `query="${ex.lastRecall.query}" score=${ex.lastRecall.score?.toFixed(3) ?? "?"} used=${ex.lastRecall.used}` : "(not in recent recalls)";
+      const text = [
+        `#${ex.id} in ${ex.scopeKey} (${ex.memType})`,
+        `importance=${ex.importance} explicit=${ex.explicit} accesses=${ex.accesses}`,
+        ex.supersedes.length ? `supersedes: ${ex.supersedes.join(", ")}` : "supersedes: none",
+        `last recall: ${lr}`,
+        `content: ${ex.content}`,
+      ].join("\n");
+      return { content: [{ type: "text" as const, text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_inspect",
+    label: "Memory Inspect",
+    description: "Show exactly what mindvault would inject into the system prompt this turn (profile + summary + recent), with token counts.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      const db = getDb();
+      const repo = gitRootSync(ctx.cwd);
+      const built = buildContext(db, { cwd: ctx.cwd, repoRoot: repo, tokenBudget: 2000 });
+      db.close();
+      const text = `~${built.summaryTokens + built.recentTokens} tokens (summary=${built.summaryTokens}, recent=${built.recentTokens})\n\n${built.text || "(nothing to inject)"}`;
+      return { content: [{ type: "text" as const, text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_edit",
+    label: "Memory Edit",
+    description: "Correct one memory in place by id: redacts, re-indexes for search, and re-embeds.",
+    parameters: Type.Object({ id: Type.Number({ description: "Observation id from memory_search" }), content: Type.String({ description: "Replacement text" }) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const db = getDb();
+      const ok = editObservation(db, { id: params.id, content: params.content, cwd: ctx.cwd });
+      if (ok && isAsyncProvider()) await embedUpgrade(db);
+      db.close();
+      return { content: [{ type: "text" as const, text: ok ? `edited #${params.id}` : `not found #${params.id}` }], details: {} };
     },
   });
 
