@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS peers(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS scopes(id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, pi_session_id TEXT UNIQUE, cwd TEXT, repo_root TEXT, scope_id INTEGER, summary TEXT, started_at REAL, ended_at REAL);
 CREATE TABLE IF NOT EXISTS session_peers(session_id TEXT NOT NULL, peer_id TEXT NOT NULL, PRIMARY KEY(session_id, peer_id));
-CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, peer_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp REAL NOT NULL, token_count INTEGER);
+CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, peer_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, timestamp REAL NOT NULL, token_count INTEGER, observed INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS observations(id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL DEFAULT 'pi', peer_id TEXT NOT NULL, session_id TEXT, scope_id INTEGER NOT NULL, mem_type TEXT NOT NULL, content TEXT NOT NULL, importance REAL NOT NULL DEFAULT 0.5, explicit INTEGER NOT NULL DEFAULT 0, supersedes_id INTEGER, expiry REAL, accesses INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, updated_at REAL NOT NULL, embedding BLOB);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_observations USING fts5(content, content='observations', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS obs_fts_insert AFTER INSERT ON observations BEGIN INSERT INTO fts_observations(rowid, content) VALUES (new.id, new.content); END;
@@ -45,6 +45,11 @@ export function openMindvault(path: string): Db {
   } catch { /* fresh schema already includes it */ }
   loadVecExtension(db);
   ensureEmbeddingDim(db);
+  // M3 reconcile: observed flag (M1/M2 DBs lack it)
+  try {
+    const mcols = db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
+    if (!mcols.some((c) => c.name === "observed")) db.exec(`ALTER TABLE messages ADD COLUMN observed INTEGER NOT NULL DEFAULT 0`);
+  } catch { /* fresh schema already includes it */ }
   backfillEmbeddings(db);
   return db;
 }
