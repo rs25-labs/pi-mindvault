@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMindvault, remember, recallSearch, getProfile, dbStatus } from "../extensions/lib/db.ts";
+import { LATEST_SCHEMA_VERSION } from "../extensions/lib/migrations.ts";
 
 function tmpDb(): string {
   return join(mkdtempSync(join(tmpdir(), "mv-")), "memory.db");
@@ -33,7 +35,38 @@ test("explicit never pruned placeholder + status", () => {
   const path = tmpDb();
   const db = openMindvault(path);
   const st = dbStatus(db);
-  assert.equal(st.schemaVersion, 1);
+  assert.equal(st.schemaVersion, LATEST_SCHEMA_VERSION);
+  db.close();
+});
+
+test("fresh DB is stamped at the latest schema version", () => {
+  const db = openMindvault(tmpDb());
+  assert.equal(dbStatus(db).schemaVersion, LATEST_SCHEMA_VERSION);
+  db.close();
+});
+
+test("busy_timeout is set on open", () => {
+  const db = openMindvault(tmpDb());
+  const r = db.prepare("PRAGMA busy_timeout").get() as { timeout: number };
+  assert.equal(r.timeout, 5000);
+  db.close();
+});
+
+test("migrates a legacy v1 DB forward without data loss", () => {
+  const path = tmpDb();
+  const legacy = new DatabaseSync(path);
+  legacy.exec("CREATE TABLE state_meta(key TEXT PRIMARY KEY, value TEXT)");
+  legacy.exec("CREATE TABLE observations(id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL DEFAULT 'pi', peer_id TEXT NOT NULL, session_id TEXT, scope_id INTEGER NOT NULL, mem_type TEXT NOT NULL, content TEXT NOT NULL, importance REAL NOT NULL DEFAULT 0.5, explicit INTEGER NOT NULL DEFAULT 0, supersedes_id INTEGER, expiry REAL, accesses INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, updated_at REAL NOT NULL)");
+  legacy.prepare("INSERT INTO observations(peer_id,scope_id,mem_type,content,created_at,updated_at) VALUES('u',1,'semantic','legacy fact',0,0)").run();
+  legacy.prepare("INSERT INTO state_meta(key,value) VALUES('schema_version','1')").run();
+  legacy.close();
+
+  const db = openMindvault(path);
+  const cols = db.prepare("PRAGMA table_info(observations)").all() as { name: string }[];
+  assert.ok(cols.some((c) => c.name === "embedding"));
+  assert.equal(dbStatus(db).schemaVersion, LATEST_SCHEMA_VERSION);
+  const row = db.prepare("SELECT content FROM observations WHERE content='legacy fact'").get() as { content: string };
+  assert.equal(row.content, "legacy fact");
   db.close();
 });
 
