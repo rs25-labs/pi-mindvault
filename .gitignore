@@ -1,26 +1,14 @@
-# secrets / auth
-agent/auth.json
-agent/*.key
-.env
-*.pem
+# dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
 
-# runtime / cache / large state (never commit)
-agent/sessions/
-agent/models-store.json
-agent/*.log
-memory/*.db
-memory/*.db-wal
-memory/*.db-shm
-memory/*.sqlite*
-cache/
+# logs
 *.log
-
-# OS
-.DS_Store
 
 # worktrees (local isolation, never commit)
 .worktrees/
 worktrees/
-node_modules/
-dist/
-*.tsbuildinfo
+
+# OS
+.DS_Store

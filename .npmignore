@@ -1,8 +1,5 @@
 # packed tarball must contain ONLY the pi package (extensions + metadata).
-# ~/.pi doubles as live pi config (agent/, caches, third-party skill dumps) —
-# none of that may ship. (With .npmignore present, npm ignores .gitignore.)
-agent/
-design-skills/
+# (With .npmignore present, npm ignores .gitignore.)
 .worktrees/
 worktrees/
 docs/
