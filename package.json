@@ -9,6 +9,8 @@
     "pi-package"
   ],
   "type": "module",
+  "files": ["extensions", "README.md", "LICENSE", "CHANGELOG.md"],
+  "engines": { "node": ">=22.5.0" },
   "pi": {
     "extensions": [
       "./extensions"
@@ -20,8 +22,8 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "typebox": "^1.3.28"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

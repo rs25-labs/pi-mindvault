@@ -22,6 +22,33 @@ test("ingest + drain derives episodic observations", () => {
   db.close();
 });
 
+test("auto-capture redacts secrets before storing raw text", () => {
+  const db = openMindvault(tmpDb());
+  const secret = "sk-abc123deadbeef456";
+  const gh = "ghp_deadbeef12345678";
+  const pem = "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBg\n-----END PRIVATE KEY-----";
+  ingestMessage(db, {
+    sessionId: "s1",
+    peer: "u",
+    role: "user",
+    content: `Here is my key ${secret} and token ${gh}. Also the block ${pem} should never persist.`,
+    cwd: "/a",
+  });
+  const raw = db.prepare("SELECT content FROM messages WHERE session_id='s1'").get() as { content: string };
+  assert.ok(!raw.content.includes(secret));
+  assert.ok(!raw.content.includes(gh));
+  assert.ok(!raw.content.includes("MIIBVgIBADANBg"));
+  assert.ok(raw.content.includes("[redacted]"));
+  drainQueue(db, { limit: 10 });
+  const obs = db.prepare("SELECT content FROM observations").all() as { content: string }[];
+  for (const o of obs) {
+    assert.ok(!o.content.includes(secret));
+    assert.ok(!o.content.includes(gh));
+    assert.ok(!o.content.includes("MIIBVgIBADANBg"));
+  }
+  db.close();
+});
+
 test("poison jobs fail after 3 attempts", () => {
   const db = openMindvault(tmpDb());
   db.prepare("INSERT INTO queue(session_id,status,attempts,payload_json,created_at) VALUES('s9','pending',2,'not-json{{{',0)").run();
