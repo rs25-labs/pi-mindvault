@@ -43,8 +43,13 @@ Tools (for agents):
 - `memory_search` — raw hybrid excerpts `{id,score,source,scope}`
 - `memory_context` — synthesized answer with `[id]` cites
 - `memory_conclude` — explicit save (`explicit=1`, wins conflicts)
+- `memory_used` — mark recalled ids that helped (boosts ranking, guards against decay)
+- `memory_why` — explain one memory (scope, importance, accesses, last-recall score)
+- `memory_inspect` — show exactly what gets injected into the prompt this turn
+- `memory_edit` — correct a memory in place (re-index + re-embed)
+- `memory_forget` — hard-delete one memory by id
 
-Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`). Set `MINDVAULT_QUIET=1` to suppress the passive per-session status banner.
+Commands: `/mindvault-setup` (initialize + seed), `/mindvault-config` (embeddings / quiet / maxObs — see below), `/memory` (status), `/dream` (consolidate), `/memory-prune <scope>`, `memory_optimize` (full maintenance).
 
 ## Embeddings
 The default (`hash`) needs no setup. To change the provider, use `/mindvault-config` — no environment variables required. Settings persist in `~/.pi/memory/config.json`.
@@ -58,10 +63,12 @@ The default (`hash`) needs no setup. To change the provider, use `/mindvault-con
 | Provider | Footprint | Private | Notes |
 |----------|-----------|---------|-------|
 | `hash` (default) | none, bundled | yes | zero-dependency feature-hash; lexical, offline |
-| `local` | model (~tens of MB) downloaded on first use; runtime is an optional dependency | yes | best recall, offline; `/mindvault-config embeddings local` fills in model + dim |
+| `local` | model (~tens of MB) downloaded on first use to `~/.pi/memory/models`; runtime is an optional dependency | yes | best recall, offline after download; `BAAI/bge-small-en-v1.5` (dim 384), filled in by `/mindvault-config embeddings local` |
 | `api` | none | no (leaves the machine) | set `url`/`key`/`model`/`dim` under `embeddings` in `config.json` |
 
-`local` uses `fastembed` (an `optionalDependency`, so a default install pulls nothing extra) — install it once in the package dir when prompted (`npm install fastembed`). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+`local` uses `fastembed` (an `optionalDependency`, so a default install pulls nothing extra) — install it once in the package dir if prompted (`cd ~/.pi/pi-mindvault && npm install fastembed`). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working — never crashes. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+
+`/memory` shows the embedder actually in use, e.g. `emb=local:fast-bge-small-en-v1.5` (semantic model active) or `emb=feature-hash` — with `unavailable→feature-hash` if `local` is selected but the runtime can't load.
 
 Every `MINDVAULT_*` environment variable still works as an optional override for scripted/CI use, but is never required.
 
