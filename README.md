@@ -1,36 +1,42 @@
 # pi-mindvault
-**A lightweight, private memory extension for [pi](https://github.com/earendil-works/pi-coding-agent) — runs entirely on your machine.**
 
-pi forgets everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
+Local memory for [pi](https://github.com/earendil-works/pi-coding-agent). It remembers how you like to work and what you've decided, keeps it all in a SQLite file on your own machine, and hands the relevant bits back to pi as you go.
 
-pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to pi on later turns. No server, no account, no network — your memory never leaves your computer.
+pi starts every session with a blank slate, so you end up explaining the same things again and again: which database you use, how you want your code, what you settled on last week. Cloud memory tools fix that by keeping your context on their servers. This one keeps it on your disk instead.
 
-> Built on pi's extension API — this is a pi package, not a standalone library. It works with the pi coding agent, not other harnesses.
+It's a pi extension, built on pi's extension API. It does not work with other agents like Claude Code or Cursor.
 
-## Why you'd care
-- **Stop repeating yourself.** Tell it "prefer explicit types" or "we deploy on Fridays" once; it resurfaces automatically when it's relevant.
-- **Fully local & private.** Everything lives in one file on your disk. Works offline, secrets are redacted before they're stored, and you can delete any memory — or a whole project's — instantly.
-- **Lightweight.** Just a SQLite file, no background service. The default needs zero extra downloads and adds no meaningful startup cost.
-- **Finds by meaning, not just keywords (opt-in).** Turn on the local semantic model and "how do we handle login?" surfaces "we switched to Clerk for auth" — no shared words required, still 100% on-device.
-- **Right memory, right project.** Memories are scoped per directory/repo by default, with a global scope for things true everywhere; one project's notes never bleed into another.
-- **You stay in control.** Inspect what it's about to inject, ask why something was recalled, and correct a memory in place.
+## What it does
+
+You tell it something once ("we deploy on Fridays", "I prefer explicit types") and it comes back later when it's useful. Everything lives in one file under `~/.pi/memory/`, so it runs offline, and you can delete a single memory or everything for a project whenever you want. Secrets are stripped out before anything gets written.
+
+Memories are kept separate by project. What you save in one repo stays out of the others, with a shared "global" space for things that hold everywhere.
+
+Out of the box it matches on keywords, which needs no setup. You can turn on a small local model for semantic search, so "how do we handle login" will find "we switched to Clerk for auth" even with no words in common. That model runs on your machine too.
+
+When you want to see what it's up to, you can ask why a memory came back, look at what it's about to hand pi this turn, or edit a memory in place.
 
 ## Install
-Requires pi with extension support and Node 22+.
+
+You'll need pi with extension support and Node 22 or newer.
 
 ```bash
 pi install npm:@rs25-labs/pi-mindvault
-# or from source:
+# from source instead:
 # pi install git:https://github.com/rs25-labs/pi-mindvault
 ```
-Then, inside pi:
+
+Run this once inside pi:
+
 ```text
 /mindvault-setup
 ```
-That creates the local database at `~/.pi/memory/memory.db` and seeds the default scopes. No API key or network required.
 
-## Use
-It works automatically: relevant memory is added to the agent's context at the start of each turn, and what you discuss is captured in the background. You can also drive it directly:
+It creates the database at `~/.pi/memory/memory.db` and sets up the default scopes. No API key, no network.
+
+## Using it
+
+Most of the time you do nothing. Relevant memory is added to pi's context at the start of each turn, and what you talk about is saved in the background. When you want to be explicit:
 
 ```text
 remember I always want WAL on as a global rule
@@ -40,42 +46,42 @@ forget <id>
 memory status
 ```
 
-Tools (for agents):
-- `memory_profile` — instant profile cards, no LLM
-- `memory_search` — ranked excerpts `{id, score, source, scope}`
-- `memory_context` — the relevant excerpts for a question, with `[id]` cites
-- `memory_conclude` — explicitly save a durable fact (wins conflicts, never decays)
-- `memory_used` — mark recalled ids that helped (boosts ranking, guards against decay)
-- `memory_why` — explain one memory (scope, importance, accesses, last-recall score)
-- `memory_inspect` — show exactly what gets injected into the prompt this turn
-- `memory_edit` — correct a memory in place (re-index + re-embed)
-- `memory_forget` — hard-delete one memory by id
+The tools available to the agent:
 
-Commands: `/mindvault-setup` (initialize + seed), `/mindvault-config` (embeddings / quiet / maxObs — see below), `/memory` (status), `/dream` (consolidate), `/memory-prune <scope>`.
+- `memory_profile` reads your profile cards instantly, no model call
+- `memory_search` returns ranked excerpts
+- `memory_context` pulls the excerpts that bear on a question
+- `memory_conclude` saves a fact you want kept for good
+- `memory_used` marks which recalled memories actually helped, so they rank higher and stay around
+- `memory_why` explains one memory: its scope, importance, how often it's been used
+- `memory_inspect` shows what would go into the prompt this turn
+- `memory_edit` fixes a memory in place
+- `memory_forget` deletes one by id
+
+Commands: `/mindvault-setup`, `/mindvault-config`, `/memory` for status, `/dream` to tidy up, `/memory-prune <scope>`.
 
 ## Embeddings
-The default (`hash`) needs no setup. To change the provider, use `/mindvault-config` — no environment variables required. Settings persist in `~/.pi/memory/config.json`.
+
+Keyword matching is the default and needs nothing from you. If you want semantic search, change the provider with `/mindvault-config`. Your choice is saved in `~/.pi/memory/config.json`, so there are no environment variables to fiddle with.
 
 ```text
-/mindvault-config                     # show current config
-/mindvault-config embeddings local    # switch to the on-device semantic model
-/mindvault-config embeddings hash     # back to the default
+/mindvault-config                     show current settings
+/mindvault-config embeddings local    use the on-device semantic model
+/mindvault-config embeddings hash     go back to keyword matching
 ```
 
-| Provider | Footprint | Private | Notes |
-|----------|-----------|---------|-------|
-| `hash` (default) | none, bundled | yes | keyword matching; lexical, fully offline |
-| `local` | model (~tens of MB) downloaded on first use to `~/.pi/memory/models` | yes | best recall, offline after download; `fast-bge-small-en-v1.5` (384-dim) |
-| `api` | none | no (leaves the machine) | set `url`/`key`/`model`/`dim` under `embeddings` in `config.json` |
+| Provider | Cost to you | Private | Notes |
+|----------|-------------|---------|-------|
+| `hash` (default) | nothing | yes | keyword matching, fully offline |
+| `local` | a model download (~tens of MB) on first use, cached in `~/.pi/memory/models` | yes | semantic search with `fast-bge-small-en-v1.5`, 384 dimensions |
+| `api` | nothing local | no, your text leaves the machine | put `url`, `key`, `model`, `dim` under `embeddings` in `config.json` |
 
-`local` uses `fastembed`, installed on demand — run `cd ~/.pi/pi-mindvault && npm install fastembed` if prompted. If the runtime or model is unavailable, recall falls back to keyword mode and keeps working — it never crashes. Switching providers re-embeds your memories lazily.
+The local model uses `fastembed`, installed on demand. If pi asks for it, run `cd ~/.pi/pi-mindvault && npm install fastembed`. If it can't load for any reason, recall quietly goes back to keyword matching and keeps working. Run `/memory` to see which one is active: `emb=local:fast-bge-small-en-v1.5` means the model is running, `emb=feature-hash` means keyword matching.
 
-`/memory` shows which embedder is actually in use, e.g. `emb=local:fast-bge-small-en-v1.5` (semantic model active) or `emb=feature-hash`, with `unavailable→feature-hash` if `local` is selected but the runtime can't load.
+## Keeping it tidy
 
-## Maintain
-- `/memory` shows a quick status line, including recall hit-rate (`recall-hit=82% of 50`).
-- `/dream` (or the `memory_optimize` tool) consolidates duplicates, prunes stale memory, and compacts the database. Run it when idle; it can be slow on large vaults.
-- Explicit saves and `global` identity facts never decay. Everything else follows a decay policy (stale, low-value, unused memories are pruned), and a size cap keeps the vault fast.
+`/memory` prints a short status line that includes a recall hit-rate. `/dream`, or the `memory_optimize` tool, merges duplicates, drops stale memories, and compacts the database. Run it when you're not busy, since it can take a while on a big vault. Facts you saved on purpose and anything in the global scope stay for good. The rest ages out once it's old, unused, and low value, and a size cap keeps things quick.
 
 ## Privacy
-Local-only by default. Secrets and tokens are redacted before storage, and absolute paths outside your working directory are jailed as `<outside-cwd>`. Delete any memory, or a whole scope, at any time.
+
+Everything stays on your disk. Secrets and tokens are removed before a memory is stored, and absolute paths outside your working directory become `<outside-cwd>`. You can delete any memory, or a whole scope, at any time.
