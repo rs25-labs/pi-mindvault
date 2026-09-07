@@ -1,9 +1,11 @@
 # pi-mindvault
-**A lightweight, private memory for your AI coding agent — runs entirely on your machine.**
+**A lightweight, private memory extension for [pi](https://github.com/earendil-works/pi-coding-agent) — runs entirely on your machine.**
 
-Coding agents forget everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
+pi forgets everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
 
-pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to the agent on later turns. No server, no account, no network — your memory never leaves your computer.
+pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to pi on later turns. No server, no account, no network — your memory never leaves your computer.
+
+> Built on pi's extension API — this is a pi package, not a standalone library. It works with the pi coding agent, not other harnesses.
 
 ## Why you'd care
 - **Stop repeating yourself.** Tell it "prefer explicit types" or "we deploy on Fridays" once; it resurfaces automatically when it's relevant.
