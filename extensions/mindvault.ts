@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade, explainObservation, editObservation, seedVault } from "./lib/db.ts";
-import { embed, isAsyncProvider, setActiveEmbedder } from "./lib/embeddings.ts";
+import { embed, isAsyncProvider, setActiveEmbedder, embedderInfo } from "./lib/embeddings.ts";
 import { loadConfig, writeConfig, type MindvaultConfig } from "./lib/config.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { fileURLToPath } from "node:url";
@@ -327,7 +327,9 @@ function flattenContent(content: unknown): string {
         if (r.n > 0) hit = `${Math.round((r.h / r.n) * 100)}% of ${r.n}`;
       } catch { /* ignore */ }
       db.close();
-      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} dim=${st.embeddingDim ?? "?"} recall-hit=${hit}`, "info");
+      const emb = await embedderInfo();
+      const embLabel = emb.ready ? emb.name : `${emb.name}(unavailable→feature-hash)`;
+      ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} emb=${embLabel} dim=${st.embeddingDim ?? "?"} recall-hit=${hit}`, "info");
     },
   });
 }

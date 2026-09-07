@@ -125,3 +125,14 @@ export async function embed(text: string): Promise<Float32Array> {
     return featureHash(text, e.dim); // dim-consistent fallback keeps stored vectors comparable
   }
 }
+
+// Describes the active embedder and, for `local`, whether its runtime is actually
+// available (else recall silently falls back to feature-hash).
+export async function embedderInfo(): Promise<{ name: string; ready: boolean }> {
+  const e = activeEmbedder();
+  if (e.name.startsWith("local:")) {
+    try { const spec = "fastembed"; await import(spec); return { name: e.name, ready: true }; }
+    catch { return { name: e.name, ready: false }; }
+  }
+  return { name: e.name, ready: true };
+}

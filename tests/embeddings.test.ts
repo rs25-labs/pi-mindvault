@@ -19,3 +19,10 @@ test("similar texts score higher than unrelated", async () => {
   const far = await e.embed("banana pancakes");
   assert.ok(cosine(q, close) > cosine(q, far));
 });
+
+test("embedderInfo reports the active embedder", async () => {
+  const { embedderInfo } = await import("../extensions/lib/embeddings.ts");
+  const info = await embedderInfo();
+  assert.equal(info.name, "feature-hash");
+  assert.equal(info.ready, true);
+});
