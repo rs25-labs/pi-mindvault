@@ -23,7 +23,7 @@ test("loadConfig returns hash defaults when no file exists", async () => {
 test("writeConfig then loadConfig round-trips the local provider", async () => {
   await withTempConfig(async () => {
     const { loadConfig, writeConfig, configPath } = await import("../extensions/lib/config.ts");
-    writeConfig({ embeddings: { provider: "local", model: "BAAI/bge-small-en-v1.5", dim: 384 }, quiet: true });
+    writeConfig({ embeddings: { provider: "local", model: "fast-bge-small-en-v1.5", dim: 384 }, quiet: true });
     const c = loadConfig();
     assert.equal(c.embeddings.provider, "local");
     assert.equal(c.embeddings.dim, 384);

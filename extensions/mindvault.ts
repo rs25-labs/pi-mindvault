@@ -289,7 +289,7 @@ function flattenContent(content: unknown): string {
         const p = (value ?? "").toLowerCase();
         if (p !== "hash" && p !== "local" && p !== "api") { ctx.ui.notify("usage: /mindvault-config embeddings <hash|local|api>", "error"); return; }
         const embeddings: MindvaultConfig["embeddings"] = { provider: p };
-        if (p === "local") { embeddings.model = "BAAI/bge-small-en-v1.5"; embeddings.dim = 384; }
+        if (p === "local") { embeddings.model = "fast-bge-small-en-v1.5"; embeddings.dim = 384; }
         writeConfig({ embeddings });
         setActiveEmbedder(null); // clear cached embedder so a later open in this session re-reads config
         let extra = " — takes effect next session";

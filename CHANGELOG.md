@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4 — 2026-09-06
+- Fix: the local embedding provider crashed pi with an uncaught `ENOENT ... local_cache/…`
+  on first use. Two causes: the model id was fastembed's HuggingFace name
+  (`BAAI/bge-small-en-v1.5`) instead of its own key (`fast-bge-small-en-v1.5`), and no
+  cache directory was set (fastembed's default `local_cache` is relative and uncreated, so
+  its download stream raised an uncatchable error). Now uses the correct key and an
+  absolute, pre-created cache dir (`~/.pi/memory/models`). Validated end-to-end against
+  fastembed 2.1.0 (real 384-dim vectors).
+- Older configs that stored the HuggingFace model id self-heal to the fastembed key.
+
 ## 0.2.3 — 2026-09-06
 - Fix: `/memory` closed the database before reading queue status and recall hit-rate,
   throwing "database is not open". Now closes after all reads.
