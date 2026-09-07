@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5 — 2026-09-06
+- `/memory` now reports the active embedder (e.g. `emb=local:fast-bge-small-en-v1.5` or
+  `emb=feature-hash`), and flags `unavailable→feature-hash` when `local` is selected but
+  the runtime can't load — so it's unambiguous which embedder is actually in use.
+
 ## 0.2.4 — 2026-09-06
 - Fix: the local embedding provider crashed pi with an uncaught `ENOENT ... local_cache/…`
   on first use. Two causes: the model id was fastembed's HuggingFace name
