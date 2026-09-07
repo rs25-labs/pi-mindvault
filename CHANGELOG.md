@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-09-06
 - Embeddings: provider selection `MINDVAULT_EMBEDDINGS_PROVIDER=hash|local|api` — opt-in
   local semantic model via `fastembed` (optional dependency, lazy download, feature-hash
   fallback), https-enforced API; default install unchanged (F3)
