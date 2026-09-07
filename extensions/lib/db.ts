@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { redact } from "./redact.ts";
+import { resolveScope } from "./scopes.ts";
 import { loadVecExtension, vecMode } from "./vec.ts";
 import { activeEmbedder, featureHash, isAsyncProvider, embed } from "./embeddings.ts";
 import { runMigrations } from "./migrations.ts";
@@ -55,6 +56,15 @@ function scopeId(db: Db, workspaceId: string, scopeKey: string): number {
 function ensurePeer(db: Db, peer: string): void {
   const kind = peer === "pi-agent" ? "agent" : "user";
   db.prepare("INSERT OR IGNORE INTO peers(id,workspace_id,kind,created_at) VALUES(?,?,?,?)").run(peer, "pi", kind, Date.now() / 1000);
+}
+
+export function seedVault(db: Db, args: { cwd: string; repoRoot?: string | null }): { peers: number; scopes: number } {
+  const peers = ["user", "pi-agent"];
+  for (const p of peers) ensurePeer(db, p);
+  const scope = resolveScope({ cwd: args.cwd, repoRoot: args.repoRoot ?? null, explicit: null });
+  const keys = ["global", scope.key];
+  for (const k of keys) scopeId(db, "pi", k);
+  return { peers: peers.length, scopes: keys.length };
 }
 
 function ensureEmbeddingModel(db: Db): void {

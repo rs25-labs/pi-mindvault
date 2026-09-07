@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade, explainObservation, editObservation } from "./lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade, explainObservation, editObservation, seedVault } from "./lib/db.ts";
 import { embed, isAsyncProvider } from "./lib/embeddings.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
@@ -17,6 +17,7 @@ function dbPath(): string {
 
 export default function (pi: ExtensionAPI) {
   const getDb = () => openMindvault(dbPath());
+  const quiet = process.env.MINDVAULT_QUIET === "1";
   const ctxScopes = (cwd: string) => {
     const repo = gitRootSync(cwd);
     return scopeKeysForRead({ cwd, repoRoot: repo });
@@ -27,7 +28,7 @@ export default function (pi: ExtensionAPI) {
       const db = getDb();
       const cards = getProfile(db, { peer: "user", scopeKeys: ctxScopes(ctx.cwd) });
       db.close();
-      if (cards.length > 0) ctx.ui.notify(`mindvault: ${cards.length} profile block(s) loaded`, "info");
+      if (cards.length > 0 && !quiet) ctx.ui.notify(`mindvault: ${cards.length} profile block(s) loaded`, "info");
     } catch { /* offline-safe: never block startup */ }
   });
 
@@ -257,9 +258,11 @@ function flattenContent(content: unknown): string {
     description: "Initialize local mindvault DB",
     handler: async (_args, ctx) => {
       const db = getDb();
+      const repo = gitRootSync(ctx.cwd);
+      const seeded = seedVault(db, { cwd: ctx.cwd, repoRoot: repo });
       const st = dbStatus(db);
       db.close();
-      ctx.ui.notify(`mindvault ready (schema ${st.schemaVersion}, ${st.observations} memories)`, "info");
+      ctx.ui.notify(`mindvault ready (schema ${st.schemaVersion}, ${st.observations} memories, ${seeded.peers} peers, ${seeded.scopes} scopes)`, "info");
     },
   });
 

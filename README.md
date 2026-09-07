@@ -1,14 +1,17 @@
 # pi-mindvault
-**Local-first sqlite memory for pi — Hermes durability, Honcho-style recall, no server.**
+**A lightweight, private memory for your AI coding agent — runs entirely on your machine.**
 
-pi forgets every session. Server memory leaks your code to the cloud. pi-mindvault remembers locally: preferences, decisions, and working rules in a single sqlite file under `~/.pi/memory/memory.db` — WAL-durable like Hermes `state.db`, reasoned like Honcho (peers/sessions/scopes), zero network required.
+Coding agents forget everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
 
-## Why
-- **Never repeat yourself:** save “prefer explicit types” once, it’s injected every turn.
-- **Right memory, right repo:** `per-directory` default + `global` for identity. `dir:~/projA` never leaks to `dir:~/projB`.
-- **Explicit wins:** corrections via `memory_conclude` supersede forever, never decay.
-- **Fast + offline:** cached `peer_cards` pre-turn (0ms), hybrid `vector + FTS5` search, queued writes, fail-open LIKE fallback.
-- **Private:** cwd-jail, secret redaction, `forget(id)` + cascade delete, scopes as ACL.
+pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to the agent on later turns. No server, no account, no network — your memory never leaves your computer.
+
+## Why you'd care
+- **Stop repeating yourself.** Tell it "prefer explicit types" or "we deploy on Fridays" once; it resurfaces automatically when it's relevant.
+- **Fully local & private.** Everything lives in one file on your disk. Works offline, secrets are redacted before they're stored, and you can delete any memory — or a whole project's — instantly.
+- **Lightweight.** Just a SQLite file, no background service. The default needs zero extra downloads and adds no meaningful startup cost.
+- **Finds by meaning, not just keywords (opt-in).** Turn on the local semantic model and "how do we handle login?" surfaces "we switched to Clerk for auth" — no shared words required, still 100% on-device.
+- **Right memory, right project.** Memories are scoped per directory/repo by default, with a global scope for things true everywhere; one project's notes never bleed into another.
+- **You stay in control.** Inspect what it's about to inject, ask why something was recalled, and correct a memory in place.
 
 ## Install (pi)
 ```bash
@@ -41,7 +44,7 @@ Tools (for agents):
 - `memory_context` — synthesized answer with `[id]` cites
 - `memory_conclude` — explicit save (`explicit=1`, wins conflicts)
 
-Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`).
+Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`). Set `MINDVAULT_QUIET=1` to suppress the passive per-session status banner.
 
 ## Embeddings
 Recall quality depends on the embedding provider, selected with `MINDVAULT_EMBEDDINGS_PROVIDER`:
