@@ -1,6 +1,11 @@
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 
 export interface Embedder { readonly dim: number; readonly name: string; embed(text: string): Promise<Float32Array>; }
+
+const DEFAULT_LOCAL_MODEL = "fast-bge-small-en-v1.5"; // fastembed's own key, not the HuggingFace id
 
 function fnv1a(str: string): number {
   let h = 0x811c9dc5;
@@ -67,11 +72,16 @@ export class LocalEmbedder implements Embedder {
   constructor(readonly dim: number, private model: string) { this.name = `local:${model}`; }
   private async load(): Promise<void> {
     const spec = "fastembed";
-    type Runtime = { init(opts: { model: string }): Promise<{ embed(texts: string[]): AsyncGenerator<number[][]> }> };
+    type Runtime = { init(opts: { model: string; cacheDir: string; showDownloadProgress: boolean }): Promise<{ embed(texts: string[]): AsyncGenerator<number[][]> }> };
     const mod = await import(spec) as unknown as { TextEmbedding?: Runtime; FlagEmbedding?: Runtime };
     const runtime = mod.TextEmbedding ?? mod.FlagEmbedding;
     if (!runtime) throw new Error("fastembed: no embedding class exported");
-    const fe = await runtime.init({ model: this.model });
+    // Pin an absolute, existing cache dir. fastembed's default ("local_cache", relative to
+    // cwd) is not created, so its download WriteStream emits an uncaught 'error' that crashes
+    // the host — which no try/catch here can intercept.
+    const cacheDir = join(homedir(), ".pi", "memory", "models");
+    mkdirSync(cacheDir, { recursive: true });
+    const fe = await runtime.init({ model: this.model, cacheDir, showDownloadProgress: false });
     this.pipe = async (text: string) => {
       for await (const batch of fe.embed([text])) return Array.from(batch[0] ?? []);
       return [];
@@ -85,7 +95,10 @@ export class LocalEmbedder implements Embedder {
 
 export function defaultEmbedder(): Embedder {
   const c = loadConfig().embeddings;
-  if (c.provider === "local") return new LocalEmbedder(c.dim && c.dim > 0 ? c.dim : 384, c.model || "BAAI/bge-small-en-v1.5");
+  if (c.provider === "local") {
+    const model = c.model && c.model.startsWith("fast-") ? c.model : DEFAULT_LOCAL_MODEL; // heal HF-style ids from older configs
+    return new LocalEmbedder(c.dim && c.dim > 0 ? c.dim : 384, model);
+  }
   if (c.provider === "api" && c.url && c.key && c.model && c.dim && c.dim > 0) return new ApiEmbedder(c.dim, c.url, c.key, c.model);
   return new FeatureHashEmbedder(256);
 }
