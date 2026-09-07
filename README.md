@@ -1,8 +1,10 @@
 # pi-mindvault
 
-Local memory for [pi](https://github.com/earendil-works/pi-coding-agent). It remembers how you like to work and what you've decided, keeps it all in a SQLite file on your own machine, and hands the relevant bits back to pi as you go.
+A private, local-first memory subsystem for [pi](https://github.com/earendil-works/pi-coding-agent), the AI coding agent. It gives pi long-term memory across sessions, stored on your own machine in a single SQLite file, with optional on-device semantic search. Nothing is sent to a server, and no data leaves your machine.
 
-pi starts every session with a blank slate, so you end up explaining the same things again and again: which database you use, how you want your code, what you settled on last week. Cloud memory tools fix that by keeping your context on their servers. This one keeps it on your disk instead.
+It remembers how you like to work and what you've decided, and hands the relevant bits back to pi as you go.
+
+pi starts every session with a blank slate, so you end up explaining the same things again and again: which database you use, how you want your code, what you settled on last week. Cloud memory tools fix that by keeping your context on their servers. This one keeps it on your disk instead. Your code, your decisions, and your keys stay local.
 
 It's a pi extension, built on pi's extension API. It does not work with other agents like Claude Code or Cursor.
 
