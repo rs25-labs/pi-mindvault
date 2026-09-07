@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-09-06
+- Setup: `/mindvault-setup` now seeds the `user`/`pi-agent` peers and `global` + current
+  directory scopes (previously it only reported status), so a fresh vault is complete on
+  first run
+- Quiet mode: `MINDVAULT_QUIET=1` suppresses the passive per-session status banner
+- Docs: plain-English README intro (lightweight, local, private, opt-in semantic)
+
 ## 0.2.0 — 2026-09-06
 - Embeddings: provider selection `MINDVAULT_EMBEDDINGS_PROVIDER=hash|local|api` — opt-in
   local semantic model via `fastembed` (optional dependency, lazy download, feature-hash

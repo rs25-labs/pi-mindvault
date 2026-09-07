@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus, explainObservation, editObservation } from "../extensions/lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, explainObservation, editObservation, seedVault } from "../extensions/lib/db.ts";
 import { LATEST_SCHEMA_VERSION } from "../extensions/lib/migrations.ts";
 
 function tmpDb(): string {
@@ -100,6 +100,19 @@ test("memory_edit updates content, search index, and embedding", () => {
   const hits = recallSearch(db, { query: "toml config", scopeKeys: ["dir:/a"], limit: 5 });
   assert.ok(hits.some((h) => h.content.includes("toml")));
   assert.equal(editObservation(db, { id: 99999, content: "x", cwd: "/a" }), false);
+  db.close();
+});
+
+test("seedVault creates peers and the global + dir scopes on a fresh DB", () => {
+  const db = openMindvault(tmpDb());
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM peers").get() as { n: number }).n, 0);
+  const r = seedVault(db, { cwd: "/home/u/proj", repoRoot: null });
+  assert.equal(r.peers, 2);
+  const peers = db.prepare("SELECT id FROM peers").all() as { id: string }[];
+  assert.deepEqual(peers.map((p) => p.id).sort(), ["pi-agent", "user"]);
+  const scopes = db.prepare("SELECT key FROM scopes").all() as { key: string }[];
+  assert.ok(scopes.some((s) => s.key === "global"));
+  assert.ok(scopes.some((s) => s.key === "dir:/home/u/proj"));
   db.close();
 });
 
