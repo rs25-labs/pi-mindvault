@@ -8,8 +8,8 @@ pi-mindvault is the local alternative. It quietly remembers your preferences, de
 ## Why you'd care
 - **Stop repeating yourself.** Tell it "prefer explicit types" or "we deploy on Fridays" once; it resurfaces automatically when it's relevant.
 - **Fully local & private.** Everything lives in one file on your disk. Works offline, secrets are redacted before they're stored, and you can delete any memory — or a whole project's — instantly.
-- **Lightweight.** Just a SQLite file, no background service. The default needs zero extra downloads and adds no meaningful startup cost.
-- **Finds by meaning, not just keywords (opt-in).** Turn on the local semantic model and "how do we handle login?" surfaces "we switched to Clerk for auth" — no shared words required, still 100% on-device.
+- **Finds by meaning, not just keywords.** By default it runs a small on-device semantic model, so "how do we handle login?" surfaces "we switched to Clerk for auth" — no shared words required, still 100% on your machine. The model downloads once on first use, then works offline.
+- **Stays lightweight if you want.** One SQLite file, no background service. Prefer zero downloads / a fully air-gapped setup? `/mindvault-config embeddings hash` switches to the built-in keyword mode with no model at all.
 - **Right memory, right project.** Memories are scoped per directory/repo by default, with a global scope for things true everywhere; one project's notes never bleed into another.
 - **You stay in control.** Inspect what it's about to inject, ask why something was recalled, and correct a memory in place.
 
@@ -47,21 +47,21 @@ Tools (for agents):
 Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`). Set `MINDVAULT_QUIET=1` to suppress the passive per-session status banner.
 
 ## Embeddings
-The default (`hash`) needs no setup. To change the provider, use `/mindvault-config` — no environment variables required. Settings persist in `~/.pi/memory/config.json`.
+`local` (an on-device semantic model) is the **default** — `/mindvault-setup` prepares it, and the model downloads once on first use. Change the provider with `/mindvault-config`; settings persist in `~/.pi/memory/config.json`, no environment variables required.
 
 ```text
 /mindvault-config                     # show current config
-/mindvault-config embeddings local    # switch to the on-device semantic model
-/mindvault-config embeddings hash     # back to the default
+/mindvault-config embeddings hash     # zero-download keyword mode (offline/air-gapped)
+/mindvault-config embeddings local    # back to the semantic default
 ```
 
 | Provider | Footprint | Private | Notes |
 |----------|-----------|---------|-------|
-| `hash` (default) | none, bundled | yes | zero-dependency feature-hash; lexical, offline |
-| `local` | model (~tens of MB) downloaded on first use; runtime is an optional dependency | yes | best recall, offline; `/mindvault-config embeddings local` fills in model + dim |
+| `local` (default) | model (~tens of MB) downloaded on first use | yes | best recall, offline after download; model `BAAI/bge-small-en-v1.5`, dim 384 |
+| `hash` | none, bundled | yes | zero-dependency feature-hash; lexical, fully offline, no model |
 | `api` | none | no (leaves the machine) | set `url`/`key`/`model`/`dim` under `embeddings` in `config.json` |
 
-`local` uses `fastembed` (an `optionalDependency`, so a default install pulls nothing extra) — install it once in the package dir when prompted (`npm install fastembed`). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+`local` uses `fastembed` (a regular dependency, so a normal install pulls it). If the runtime or model can't load (e.g. offline first use, unsupported platform), embeddings fall back to keyword mode and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
 
 Every `MINDVAULT_*` environment variable still works as an optional override for scripted/CI use, but is never required.
 

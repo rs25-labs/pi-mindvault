@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-09-06
+- Embeddings now default to the on-device semantic model (`local`). `fastembed` is a
+  regular dependency; the model downloads once on first use (or during `/mindvault-setup`,
+  which now warms it up), and falls back to keyword mode if it can't load.
+- `/mindvault-config embeddings hash` opts back into the zero-download keyword mode for
+  offline/air-gapped or lightweight setups.
+- Upgrading re-embeds existing memories with the local model lazily on first use.
+
 ## 0.2.3 — 2026-09-06
 - Fix: `/memory` closed the database before reading queue status and recall hit-rate,
   throwing "database is not open". Now closes after all reads.

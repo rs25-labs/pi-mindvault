@@ -271,7 +271,16 @@ function flattenContent(content: unknown): string {
       const seeded = seedVault(db, { cwd: ctx.cwd, repoRoot: repo });
       const st = dbStatus(db);
       db.close();
-      ctx.ui.notify(`mindvault ready (schema ${st.schemaVersion}, ${st.observations} memories, ${seeded.peers} peers, ${seeded.scopes} scopes)`, "info");
+      const cfg = loadConfig();
+      if (cfg.embeddings.provider === "local") {
+        if (await fastembedAvailable()) {
+          ctx.ui.notify("mindvault: preparing local embedding model (one-time download)…", "info");
+          try { await embed("warmup"); } catch { /* runtime falls back to keyword mode */ }
+        } else {
+          ctx.ui.notify(`mindvault: local model needs fastembed — run (cd ${pkgDir} && npm install fastembed), or /mindvault-config embeddings hash`, "info");
+        }
+      }
+      ctx.ui.notify(`mindvault ready (schema ${st.schemaVersion}, ${st.observations} memories, ${seeded.peers} peers, ${seeded.scopes} scopes, embeddings=${cfg.embeddings.provider})`, "info");
     },
   });
 

@@ -10,7 +10,7 @@ export interface MindvaultConfig {
   maxObs: number;
 }
 
-const DEFAULTS: MindvaultConfig = { embeddings: { provider: "hash" }, quiet: false, maxObs: 50000 };
+const DEFAULTS: MindvaultConfig = { embeddings: { provider: "local" }, quiet: false, maxObs: 50000 };
 
 export function configPath(): string {
   return process.env.MINDVAULT_CONFIG_PATH ?? join(homedir(), ".pi", "memory", "config.json");
@@ -32,7 +32,7 @@ function coerceProvider(p: unknown): Provider {
 export function loadConfig(): MindvaultConfig {
   const file = readFile();
   const cfg: MindvaultConfig = {
-    embeddings: { ...DEFAULTS.embeddings, ...(file.embeddings ?? {}), provider: coerceProvider(file.embeddings?.provider) },
+    embeddings: { ...DEFAULTS.embeddings, ...(file.embeddings ?? {}), provider: coerceProvider(file.embeddings?.provider ?? DEFAULTS.embeddings.provider) },
     quiet: typeof file.quiet === "boolean" ? file.quiet : DEFAULTS.quiet,
     maxObs: typeof file.maxObs === "number" && file.maxObs > 0 ? file.maxObs : DEFAULTS.maxObs,
   };
