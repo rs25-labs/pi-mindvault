@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 — 2026-09-06
+- Fix: `/memory` closed the database before reading queue status and recall hit-rate,
+  throwing "database is not open". Now closes after all reads.
+
 ## 0.2.2 — 2026-09-06
 - Config file: `~/.pi/memory/config.json` (set via `/mindvault-config`) now drives the
   embedding provider, quiet mode, and size cap — no environment variables required.

@@ -320,13 +320,13 @@ function flattenContent(content: unknown): string {
     handler: async (_args, ctx) => {
       const db = getDb();
       const st = dbStatus(db);
-      db.close();
       const q = queueStatus(db);
       let hit = "(no queries yet)";
       try {
         const r = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(hit),0) AS h FROM recall_log").get() as { n: number; h: number };
         if (r.n > 0) hit = `${Math.round((r.h / r.n) * 100)}% of ${r.n}`;
       } catch { /* ignore */ }
+      db.close();
       ctx.ui.notify(`mindvault: schema=${st.schemaVersion} obs=${st.observations} fts=${st.ftsCount} queue=${st.queuePending}+${q.pending}p/${q.failed}f vec=${st.vecMode} dim=${st.embeddingDim ?? "?"} recall-hit=${hit}`, "info");
     },
   });
