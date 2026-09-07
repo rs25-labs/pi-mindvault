@@ -12,6 +12,14 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   return dot; // inputs are L2-normalized
 }
 
+function l2norm(v: Float32Array): Float32Array {
+  let n = 0;
+  for (let i = 0; i < v.length; i++) n += v[i] * v[i];
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < v.length; i++) v[i] /= n;
+  return v;
+}
+
 export function featureHash(text: string, dim: number): Float32Array {
   const v = new Float32Array(dim);
   const toks = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -19,11 +27,7 @@ export function featureHash(text: string, dim: number): Float32Array {
     v[fnv1a(toks[i]) % dim] += 1;
     if (i > 0) v[fnv1a(toks[i - 1] + " " + toks[i]) % dim] += 0.5;
   }
-  let n = 0;
-  for (let i = 0; i < v.length; i++) n += v[i] * v[i];
-  n = Math.sqrt(n) || 1;
-  for (let i = 0; i < v.length; i++) v[i] /= n;
-  return v;
+  return l2norm(v);
 }
 
 export class FeatureHashEmbedder implements Embedder {
@@ -38,27 +42,75 @@ export class ApiEmbedder implements Embedder {
   readonly name = "api";
   constructor(readonly dim: number, private baseUrl: string, private key: string, private model: string) {}
   async embed(text: string): Promise<Float32Array> {
-    const res = await fetch(this.baseUrl.replace(/\/$/, "") + "/embeddings", {
+    const url = this.baseUrl.replace(/\/$/, "") + "/embeddings";
+    if (!url.startsWith("https://")) throw new Error("embeddings API must use https");
+    const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.key}` },
       body: JSON.stringify({ model: this.model, input: text }),
     });
     if (!res.ok) throw new Error(`embeddings API ${res.status}`);
     const json = (await res.json()) as { data: { embedding: number[] }[] };
-    const arr = Float32Array.from(json.data[0].embedding.slice(0, this.dim));
-    let n = 0;
-    for (let i = 0; i < arr.length; i++) n += arr[i] * arr[i];
-    n = Math.sqrt(n) || 1;
-    for (let i = 0; i < arr.length; i++) arr[i] /= n;
-    return arr;
+    return l2norm(Float32Array.from(json.data[0].embedding.slice(0, this.dim)));
+  }
+}
+
+// Local model provider. Uses `fastembed` (wraps onnxruntime-node) as an optional
+// dependency, lazily loaded and cached; the model file downloads on first use. If the
+// dependency or model is unavailable, embed() throws and callers fall back to feature-hash.
+export class LocalEmbedder implements Embedder {
+  readonly name: string;
+  private pipe: ((text: string) => Promise<number[]>) | null = null;
+  private loading: Promise<void> | null = null;
+  constructor(readonly dim: number, private model: string) { this.name = `local:${model}`; }
+  private async load(): Promise<void> {
+    const spec = "fastembed";
+    type Runtime = { init(opts: { model: string }): Promise<{ embed(texts: string[]): AsyncGenerator<number[][]> }> };
+    const mod = await import(spec) as unknown as { TextEmbedding?: Runtime; FlagEmbedding?: Runtime };
+    const runtime = mod.TextEmbedding ?? mod.FlagEmbedding;
+    if (!runtime) throw new Error("fastembed: no embedding class exported");
+    const fe = await runtime.init({ model: this.model });
+    this.pipe = async (text: string) => {
+      for await (const batch of fe.embed([text])) return Array.from(batch[0] ?? []);
+      return [];
+    };
+  }
+  async embed(text: string): Promise<Float32Array> {
+    if (!this.pipe) { this.loading ??= this.load(); await this.loading; }
+    return l2norm(Float32Array.from((await this.pipe!(text)).slice(0, this.dim)));
   }
 }
 
 export function defaultEmbedder(): Embedder {
+  const provider = (process.env.MINDVAULT_EMBEDDINGS_PROVIDER ?? "").toLowerCase();
   const base = process.env.MINDVAULT_EMBEDDINGS_URL ?? "";
   const key = process.env.MINDVAULT_EMBEDDINGS_KEY ?? "";
   const model = process.env.MINDVAULT_EMBEDDINGS_MODEL ?? "";
   const dim = Number(process.env.MINDVAULT_EMBEDDINGS_DIM ?? "0");
-  if (base && key && model && dim > 0) return new ApiEmbedder(dim, base, key, model);
+  if (provider === "local") return new LocalEmbedder(dim > 0 ? dim : 384, model || "fast-bge-small-en-v1.5");
+  if ((provider === "api" || !provider) && base && key && model && dim > 0) return new ApiEmbedder(dim, base, key, model);
   return new FeatureHashEmbedder(256);
+}
+
+let active: Embedder | null = null;
+
+export function activeEmbedder(): Embedder {
+  return (active ??= defaultEmbedder());
+}
+
+export function setActiveEmbedder(e: Embedder | null): void {
+  active = e;
+}
+
+export function isAsyncProvider(): boolean {
+  return activeEmbedder().name !== "feature-hash";
+}
+
+export async function embed(text: string): Promise<Float32Array> {
+  const e = activeEmbedder();
+  try {
+    return await e.embed(text);
+  } catch {
+    return featureHash(text, e.dim); // dim-consistent fallback keeps stored vectors comparable
+  }
 }

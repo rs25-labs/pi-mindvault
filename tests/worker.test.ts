@@ -49,6 +49,26 @@ test("auto-capture redacts secrets before storing raw text", () => {
   db.close();
 });
 
+test("a multi-sentence decision stays in one observation", () => {
+  const db = openMindvault(tmpDb());
+  ingestMessage(db, { sessionId: "s1", peer: "u", role: "user", content: "We decided to adopt Postgres as the primary datastore. This choice keeps transactions ACID compliant.", cwd: "/a" });
+  drainQueue(db, { limit: 10 });
+  const obs = db.prepare("SELECT content FROM observations").all() as { content: string }[];
+  assert.equal(obs.length, 1);
+  assert.ok(obs[0].content.includes("Postgres") && obs[0].content.includes("ACID"));
+  db.close();
+});
+
+test("a code fence survives as an observation beyond 200 chars", () => {
+  const db = openMindvault(tmpDb());
+  const code = "```js\n" + "const x = 1; // config line\n".repeat(12) + "```";
+  ingestMessage(db, { sessionId: "s1", peer: "u", role: "user", content: `Here is the setup.\n${code}\nThat is all.`, cwd: "/a" });
+  drainQueue(db, { limit: 10 });
+  const obs = db.prepare("SELECT content FROM observations").all() as { content: string }[];
+  assert.ok(obs.some((o) => o.content.includes("```") && o.content.length > 200));
+  db.close();
+});
+
 test("poison jobs fail after 3 attempts", () => {
   const db = openMindvault(tmpDb());
   db.prepare("INSERT INTO queue(session_id,status,attempts,payload_json,created_at) VALUES('s9','pending',2,'not-json{{{',0)").run();

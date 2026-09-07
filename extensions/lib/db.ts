@@ -3,7 +3,7 @@ import { mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { redact } from "./redact.ts";
 import { loadVecExtension, vecMode } from "./vec.ts";
-import { defaultEmbedder, featureHash } from "./embeddings.ts";
+import { activeEmbedder, featureHash, isAsyncProvider, embed } from "./embeddings.ts";
 import { runMigrations } from "./migrations.ts";
 
 export type Db = DatabaseSync;
@@ -40,7 +40,7 @@ export function openMindvault(path: string): Db {
   runMigrations(db);
   db.prepare("INSERT OR IGNORE INTO workspaces(id,config_json) VALUES('pi','{}')").run();
   loadVecExtension(db);
-  ensureEmbeddingDim(db);
+  ensureEmbeddingModel(db);
   backfillEmbeddings(db);
   return db;
 }
@@ -57,18 +57,17 @@ function ensurePeer(db: Db, peer: string): void {
   db.prepare("INSERT OR IGNORE INTO peers(id,workspace_id,kind,created_at) VALUES(?,?,?,?)").run(peer, "pi", kind, Date.now() / 1000);
 }
 
-function ensureEmbeddingDim(db: Db): void {
-  const dim = defaultEmbedder().dim;
-  const row = db.prepare("SELECT value FROM state_meta WHERE key='embedding_dim'").get() as { value?: string } | undefined;
-  if (!row) {
-    db.prepare("INSERT INTO state_meta(key,value) VALUES('embedding_dim',?)").run(String(dim));
-    return;
-  }
-  if (Number(row.value) !== dim) {
-    // embedding model changed: drop native vectors, null stored blobs for lazy re-embed
+function ensureEmbeddingModel(db: Db): void {
+  const emb = activeEmbedder();
+  const dimRow = db.prepare("SELECT value FROM state_meta WHERE key='embedding_dim'").get() as { value?: string } | undefined;
+  const nameRow = db.prepare("SELECT value FROM state_meta WHERE key='embedding_model'").get() as { value?: string } | undefined;
+  const changed = (!!dimRow && Number(dimRow.value) !== emb.dim) || (!!nameRow && nameRow.value !== emb.name);
+  db.prepare("INSERT INTO state_meta(key,value) VALUES('embedding_dim',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(emb.dim));
+  db.prepare("INSERT INTO state_meta(key,value) VALUES('embedding_model',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(emb.name);
+  if (changed) {
+    // embedding model or dim changed: drop native vectors, null stored blobs for lazy re-embed
     try { db.exec("DELETE FROM vec_observations"); } catch { /* js mode: nothing */ }
     db.prepare("UPDATE observations SET embedding=NULL").run();
-    db.prepare("UPDATE state_meta SET value=? WHERE key='embedding_dim'").run(String(dim));
   }
 }
 
@@ -89,9 +88,10 @@ function jsCosine(a: Float32Array, b: Float32Array): number {
 }
 
 export function backfillEmbeddings(db: Db, limit = 200): number {
+  if (isAsyncProvider()) return 0; // real providers fill NULL rows via embedUpgrade
   const rows = db.prepare("SELECT id, content FROM observations WHERE embedding IS NULL LIMIT ?").all(limit) as { id: number; content: string }[];
   if (rows.length === 0) return 0;
-  const dim = defaultEmbedder().dim;
+  const dim = activeEmbedder().dim;
   const mode = vecMode(db);
   let n = 0;
   for (const r of rows) {
@@ -105,6 +105,25 @@ export function backfillEmbeddings(db: Db, limit = 200): number {
   return n;
 }
 
+export async function embedUpgrade(db: Db, limit = 200): Promise<number> {
+  if (!isAsyncProvider()) return 0;
+  const rows = db.prepare("SELECT id, content FROM observations WHERE embedding IS NULL LIMIT ?").all(limit) as { id: number; content: string }[];
+  if (rows.length === 0) return 0;
+  const mode = vecMode(db);
+  let n = 0;
+  for (const r of rows) {
+    try {
+      const v = toBlob(await embed(r.content));
+      db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, r.id);
+      if (mode === "vec0") {
+        try { db.prepare("INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES(?,?)").run(r.id, v); } catch { /* js scan covers */ }
+      }
+      n++;
+    } catch { /* leave NULL; retried next pass */ }
+  }
+  return n;
+}
+
 export function remember(db: Db, args: { peer: string; content: string; memType: MemType; scopeKey: string; explicit: 0 | 1; cwd: string; importance?: number }): number {
   const clean = redact(args.content, { cwd: args.cwd });
   ensurePeer(db, args.peer);
@@ -112,13 +131,15 @@ export function remember(db: Db, args: { peer: string; content: string; memType:
   const now = Date.now() / 1000;
   const r = db.prepare("INSERT INTO observations(workspace_id,peer_id,session_id,scope_id,mem_type,content,importance,explicit,accesses,created_at,updated_at) VALUES('pi',?,NULL,?,?,?,COALESCE(?,0.5),?,0,?,?)").run(args.peer, sid, args.memType, clean, args.importance ?? null, args.explicit, now, now) as { lastInsertRowid: number | bigint };
   const id = Number(r.lastInsertRowid);
-  try {
-    const v = toBlob(featureHash(clean, defaultEmbedder().dim));
-    db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, id);
-    if (vecMode(db) === "vec0") {
-      try { db.prepare("INSERT INTO vec_observations(rowid, embedding) VALUES(?,?)").run(id, v); } catch { /* js fallback covers */ }
-    }
-  } catch { /* embedding never blocks a write */ }
+  if (!isAsyncProvider()) {
+    try {
+      const v = toBlob(featureHash(clean, activeEmbedder().dim));
+      db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, id);
+      if (vecMode(db) === "vec0") {
+        try { db.prepare("INSERT INTO vec_observations(rowid, embedding) VALUES(?,?)").run(id, v); } catch { /* js fallback covers */ }
+      }
+    } catch { /* embedding never blocks a write */ }
+  }
   // refresh peer card for global scope (fast inject source)
   if (args.scopeKey === "global") {
     const rows = db.prepare("SELECT content FROM observations WHERE peer_id=? AND scope_id=? ORDER BY id DESC LIMIT 20").all(args.peer, sid) as { content: string }[];
@@ -128,12 +149,68 @@ export function remember(db: Db, args: { peer: string; content: string; memType:
   return id;
 }
 
+export interface Explanation {
+  id: number; content: string; scopeKey: string; memType: string; importance: number;
+  explicit: number; accesses: number; createdAt: number; updatedAt: number;
+  supersedes: number[]; lastRecall: { query: string; score: number | null; used: boolean } | null;
+}
+
+export function explainObservation(db: Db, id: number): Explanation | null {
+  const row = db.prepare(
+    `SELECT o.id, o.content, s.key AS scopeKey, o.mem_type, o.importance, o.explicit, o.accesses, o.created_at, o.updated_at, o.supersedes_id
+     FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE o.id=?`
+  ).get(id) as { id: number; content: string; scopeKey: string; mem_type: string; importance: number; explicit: number; accesses: number; created_at: number; updated_at: number; supersedes_id: number | null } | undefined;
+  if (!row) return null;
+  const supersedes: number[] = [];
+  const seen = new Set<number>();
+  let sup = row.supersedes_id;
+  while (sup && !seen.has(sup)) {
+    supersedes.push(sup);
+    seen.add(sup);
+    const next = db.prepare("SELECT supersedes_id FROM observations WHERE id=?").get(sup) as { supersedes_id: number | null } | undefined;
+    sup = next?.supersedes_id ?? null;
+  }
+  const logs = db.prepare("SELECT query, result_ids_json, scores_json, used_ids_json FROM recall_log ORDER BY id DESC LIMIT 50").all() as { query: string; result_ids_json: string | null; scores_json: string | null; used_ids_json: string | null }[];
+  let lastRecall: Explanation["lastRecall"] = null;
+  for (const l of logs) {
+    const ids = JSON.parse(l.result_ids_json ?? "[]") as number[];
+    const k = ids.indexOf(id);
+    if (k >= 0) {
+      const scores = JSON.parse(l.scores_json ?? "[]") as number[];
+      const used = JSON.parse(l.used_ids_json ?? "[]") as number[];
+      lastRecall = { query: l.query, score: scores[k] ?? null, used: used.includes(id) };
+      break;
+    }
+  }
+  return { id: row.id, content: row.content, scopeKey: row.scopeKey, memType: row.mem_type, importance: row.importance, explicit: row.explicit, accesses: row.accesses, createdAt: row.created_at, updatedAt: row.updated_at, supersedes, lastRecall };
+}
+
+export function editObservation(db: Db, args: { id: number; content: string; cwd: string }): boolean {
+  const clean = redact(args.content, { cwd: args.cwd });
+  const now = Date.now() / 1000;
+  const r = db.prepare("UPDATE observations SET content=?, updated_at=? WHERE id=?").run(clean, now, args.id) as { changes: number | bigint };
+  if (Number(r.changes) === 0) return false;
+  if (!isAsyncProvider()) {
+    try {
+      const v = toBlob(featureHash(clean, activeEmbedder().dim));
+      db.prepare("UPDATE observations SET embedding=? WHERE id=?").run(v, args.id);
+      if (vecMode(db) === "vec0") {
+        try { db.prepare("INSERT OR REPLACE INTO vec_observations(rowid, embedding) VALUES(?,?)").run(args.id, v); } catch { /* js fallback covers */ }
+      }
+    } catch { /* embedding never blocks an edit */ }
+  } else {
+    db.prepare("UPDATE observations SET embedding=NULL WHERE id=?").run(args.id); // embedUpgrade re-fills
+  }
+  return true;
+}
+
 export interface Hit { id: number; content: string; score: number; source: string; scopeKey: string }
 
-export function recallSearch(db: Db, args: { query: string; scopeKeys: string[]; limit?: number }): Hit[] {
+export function recallSearch(db: Db, args: { query: string; scopeKeys: string[]; limit?: number; queryVector?: Float32Array }): Hit[] {
   const limit = args.limit ?? 5;
   if (args.scopeKeys.length === 0) return [];
   const placeholders = args.scopeKeys.map(() => "?").join(",");
+  const qf = args.queryVector ?? (isAsyncProvider() ? null : featureHash(args.query, activeEmbedder().dim));
   const K = 60;
   const rrf = new Map<number, { rrf: number; sources: string[] }>();
   const add = (id: number, rank: number, src: string) => {
@@ -157,30 +234,31 @@ export function recallSearch(db: Db, args: { query: string; scopeKeys: string[];
     ).all(like, ...args.scopeKeys) as { id: number }[];
     rows.forEach((r, i) => add(r.id, i, "like"));
   }
-  // vector leg: vec0 when available, JS cosine scan otherwise
-  try {
-    if (vecMode(db) === "vec0") {
-      const qv = toBlob(featureHash(args.query, defaultEmbedder().dim));
+  // vector leg: vec0 when available, JS cosine scan otherwise (skipped when no query vector)
+  if (qf) {
+    try {
+      if (vecMode(db) === "vec0") {
+        const qv = toBlob(qf);
+        const rows = db.prepare(
+          `SELECT o.id FROM vec_observations v JOIN observations o ON o.id = v.rowid JOIN scopes s ON s.id=o.scope_id
+           WHERE v.embedding MATCH ? AND k = 20 AND s.key IN (${placeholders})`
+        ).all(qv, ...args.scopeKeys) as { id: number }[];
+        if (rows.length === 0) throw new Error("vec0-empty");
+        rows.forEach((r, i) => add(r.id, i, "vec"));
+      } else {
+        throw new Error("js-scan");
+      }
+    } catch {
       const rows = db.prepare(
-        `SELECT o.id FROM vec_observations v JOIN observations o ON o.id = v.rowid JOIN scopes s ON s.id=o.scope_id
-         WHERE v.embedding MATCH ? AND k = 20 AND s.key IN (${placeholders})`
-      ).all(qv, ...args.scopeKeys) as { id: number }[];
-      if (rows.length === 0) throw new Error("vec0-empty");
-      rows.forEach((r, i) => add(r.id, i, "vec"));
-    } else {
-      throw new Error("js-scan");
+        `SELECT o.id, o.embedding FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE s.key IN (${placeholders})`
+      ).all(...args.scopeKeys) as { id: number; embedding: Buffer | null }[];
+      rows
+        .map((r) => ({ id: r.id, s: r.embedding ? jsCosine(qf, fromBlob(r.embedding)!) : -1 }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s)
+        .slice(0, 20)
+        .forEach((r, i) => add(r.id, i, "vec"));
     }
-  } catch {
-    const qf = featureHash(args.query, defaultEmbedder().dim);
-    const rows = db.prepare(
-      `SELECT o.id, o.embedding FROM observations o JOIN scopes s ON s.id=o.scope_id WHERE s.key IN (${placeholders})`
-    ).all(...args.scopeKeys) as { id: number; embedding: Buffer | null }[];
-    rows
-      .map((r) => ({ id: r.id, s: r.embedding ? jsCosine(qf, fromBlob(r.embedding)!) : -1 }))
-      .filter((x) => x.s > 0)
-      .sort((a, b) => b.s - a.s)
-      .slice(0, 20)
-      .forEach((r, i) => add(r.id, i, "vec"));
   }
   if (rrf.size === 0) { logRecall(db, args.query, null, [], []); return []; }
   const ids = [...rrf.keys()];

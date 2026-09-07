@@ -2,13 +2,13 @@
 // but no supported extension-invoked chat/completions path, so Dreamer is heuristic.
 // Set MINDVAULT_LLM_DREAM=1 in future when pi exposes one; heuristic stays the default.
 import type { Db } from "./db.ts";
-import { featureHash, defaultEmbedder } from "./embeddings.ts";
+import { featureHash, activeEmbedder } from "./embeddings.ts";
 import { vecMode } from "./vec.ts";
 
 export interface DreamStats { merged: number; pruned: number; cards: number }
 
 function embOf(content: string): Float32Array {
-  return featureHash(content, defaultEmbedder().dim);
+  return featureHash(content, activeEmbedder().dim);
 }
 function cos(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) return -1;

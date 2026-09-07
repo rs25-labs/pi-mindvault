@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openMindvault, remember, recallSearch, getProfile, dbStatus } from "../extensions/lib/db.ts";
+import { openMindvault, remember, recallSearch, getProfile, dbStatus, explainObservation, editObservation } from "../extensions/lib/db.ts";
 import { LATEST_SCHEMA_VERSION } from "../extensions/lib/migrations.ts";
 
 function tmpDb(): string {
@@ -74,6 +74,32 @@ test("db file is created with 0600 permissions", { skip: process.platform === "w
   const path = tmpDb();
   const db = openMindvault(path);
   assert.equal(statSync(path).mode & 0o777, 0o600);
+  db.close();
+});
+
+test("memory_why explains a recalled observation", () => {
+  const db = openMindvault(tmpDb());
+  const id = remember(db, { peer: "u", content: "deploy uses blue-green strategy", memType: "semantic", scopeKey: "dir:/a", explicit: 1, cwd: "/a" });
+  recallSearch(db, { query: "blue-green deploy", scopeKeys: ["dir:/a"], limit: 5 });
+  const ex = explainObservation(db, id);
+  assert.ok(ex);
+  assert.equal(ex!.explicit, 1);
+  assert.equal(ex!.scopeKey, "dir:/a");
+  assert.ok(ex!.accesses >= 1);
+  assert.ok(ex!.lastRecall && ex!.lastRecall.query.includes("blue-green"));
+  assert.equal(explainObservation(db, 99999), null);
+  db.close();
+});
+
+test("memory_edit updates content, search index, and embedding", () => {
+  const db = openMindvault(tmpDb());
+  const id = remember(db, { peer: "u", content: "prefers yaml config", memType: "semantic", scopeKey: "dir:/a", explicit: 0, cwd: "/a" });
+  assert.ok(editObservation(db, { id, content: "prefers toml config", cwd: "/a" }));
+  const row = db.prepare("SELECT content FROM observations WHERE id=?").get(id) as { content: string };
+  assert.equal(row.content, "prefers toml config");
+  const hits = recallSearch(db, { query: "toml config", scopeKeys: ["dir:/a"], limit: 5 });
+  assert.ok(hits.some((h) => h.content.includes("toml")));
+  assert.equal(editObservation(db, { id: 99999, content: "x", cwd: "/a" }), false);
   db.close();
 });
 
