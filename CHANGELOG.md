@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.6 — 2026-09-07
+- Docs: rewrite the README in plain language and trim it to user-facing sections. No code changes.
+
 ## 0.2.5 — 2026-09-06
 - `/memory` now reports the active embedder (e.g. `emb=local:fast-bge-small-en-v1.5` or
   `emb=feature-hash`), and flags `unavailable→feature-hash` when `local` is selected but
