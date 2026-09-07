@@ -1,9 +1,11 @@
 # pi-mindvault
-**A lightweight, private memory for your AI coding agent — runs entirely on your machine.**
+**A lightweight, private memory extension for [pi](https://github.com/earendil-works/pi-coding-agent) — runs entirely on your machine.**
 
-Coding agents forget everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
+pi forgets everything the moment a session ends, so you keep re-explaining your stack, your conventions, and decisions you already made. The usual fix is cloud-hosted memory — but that ships your code and context off your machine.
 
-pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to the agent on later turns. No server, no account, no network — your memory never leaves your computer.
+pi-mindvault is the local alternative. It quietly remembers your preferences, decisions, and project facts in a single SQLite file under `~/.pi/memory/`, and feeds the relevant bits back to pi on later turns. No server, no account, no network — your memory never leaves your computer.
+
+> Built on pi's extension API — this is a pi package, not a standalone library. It works with the pi coding agent, not other harnesses.
 
 ## Why you'd care
 - **Stop repeating yourself.** Tell it "prefer explicit types" or "we deploy on Fridays" once; it resurfaces automatically when it's relevant.
@@ -13,43 +15,43 @@ pi-mindvault is the local alternative. It quietly remembers your preferences, de
 - **Right memory, right project.** Memories are scoped per directory/repo by default, with a global scope for things true everywhere; one project's notes never bleed into another.
 - **You stay in control.** Inspect what it's about to inject, ask why something was recalled, and correct a memory in place.
 
-## Install (pi)
+## Install
+Requires pi with extension support and Node 22+.
+
 ```bash
 pi install npm:@rs25-labs/pi-mindvault
 # or from source:
 # pi install git:https://github.com/rs25-labs/pi-mindvault
 ```
-Then in pi:
+Then, inside pi:
 ```text
 /mindvault-setup
 ```
-This creates `~/.pi/memory/memory.db` (WAL), `workspace=pi`, peers (`<user>`, `pi-agent`), scopes (`global`, `dir:<cwd>`).
-
-No API key needed for local mode. Optional API embeddings as fallback (pluggable).
+That creates the local database at `~/.pi/memory/memory.db` and seeds the default scopes. No API key or network required.
 
 ## Use
-Auto: profile injected pre-turn, messages synced post-turn. Manual:
+It works automatically: relevant memory is added to the agent's context at the start of each turn, and what you discuss is captured in the background. You can also drive it directly:
 
 ```text
-remember I always want WAL on as global procedural rule
-search what did we decide about sqlite-vec?
-context why did we pick per-directory default?
+remember I always want WAL on as a global rule
+search what did we decide about sqlite?
+context why did we pick the per-directory default?
 forget <id>
 memory status
 ```
 
 Tools (for agents):
-- `memory_profile` — instant cards, no LLM
-- `memory_search` — raw hybrid excerpts `{id,score,source,scope}`
-- `memory_context` — synthesized answer with `[id]` cites
-- `memory_conclude` — explicit save (`explicit=1`, wins conflicts)
+- `memory_profile` — instant profile cards, no LLM
+- `memory_search` — ranked excerpts `{id, score, source, scope}`
+- `memory_context` — the relevant excerpts for a question, with `[id]` cites
+- `memory_conclude` — explicitly save a durable fact (wins conflicts, never decays)
 - `memory_used` — mark recalled ids that helped (boosts ranking, guards against decay)
 - `memory_why` — explain one memory (scope, importance, accesses, last-recall score)
 - `memory_inspect` — show exactly what gets injected into the prompt this turn
 - `memory_edit` — correct a memory in place (re-index + re-embed)
 - `memory_forget` — hard-delete one memory by id
 
-Commands: `/mindvault-setup` (initialize + seed), `/mindvault-config` (embeddings / quiet / maxObs — see below), `/memory` (status), `/dream` (consolidate), `/memory-prune <scope>`, `memory_optimize` (full maintenance).
+Commands: `/mindvault-setup` (initialize + seed), `/mindvault-config` (embeddings / quiet / maxObs — see below), `/memory` (status), `/dream` (consolidate), `/memory-prune <scope>`.
 
 ## Embeddings
 The default (`hash`) needs no setup. To change the provider, use `/mindvault-config` — no environment variables required. Settings persist in `~/.pi/memory/config.json`.
@@ -62,57 +64,18 @@ The default (`hash`) needs no setup. To change the provider, use `/mindvault-con
 
 | Provider | Footprint | Private | Notes |
 |----------|-----------|---------|-------|
-| `hash` (default) | none, bundled | yes | zero-dependency feature-hash; lexical, offline |
-| `local` | model (~tens of MB) downloaded on first use to `~/.pi/memory/models`; runtime is an optional dependency | yes | best recall, offline after download; `BAAI/bge-small-en-v1.5` (dim 384), filled in by `/mindvault-config embeddings local` |
+| `hash` (default) | none, bundled | yes | keyword matching; lexical, fully offline |
+| `local` | model (~tens of MB) downloaded on first use to `~/.pi/memory/models` | yes | best recall, offline after download; `fast-bge-small-en-v1.5` (384-dim) |
 | `api` | none | no (leaves the machine) | set `url`/`key`/`model`/`dim` under `embeddings` in `config.json` |
 
-`local` uses `fastembed` (an `optionalDependency`, so a default install pulls nothing extra) — install it once in the package dir if prompted (`cd ~/.pi/pi-mindvault && npm install fastembed`). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working — never crashes. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+`local` uses `fastembed`, installed on demand — run `cd ~/.pi/pi-mindvault && npm install fastembed` if prompted. If the runtime or model is unavailable, recall falls back to keyword mode and keeps working — it never crashes. Switching providers re-embeds your memories lazily.
 
-`/memory` shows the embedder actually in use, e.g. `emb=local:fast-bge-small-en-v1.5` (semantic model active) or `emb=feature-hash` — with `unavailable→feature-hash` if `local` is selected but the runtime can't load.
-
-Every `MINDVAULT_*` environment variable still works as an optional override for scripted/CI use, but is never required.
-
-## How it works
-- Hermes pattern: single sqlite, WAL, FTS5 external-content + triggers, chunked rebuild, fail-open detach.
-- Honcho pattern: `workspace > peers <> sessions > messages`, async Deriver (explicit+deductive) + Dreamer (consolidate, peer cards, session summaries 40/60), RRF `0.6*vector+FTS +0.25*recency+0.15*importance`, scopes filter.
-- Types: `episodic / semantic~observations / procedural / working` + `peer_cards` + `summaries`.
-
-## Status
-M1 schema+tools → M2 vector+scopes → M3 async+inject → M4 optimize+publish. See `docs/superpowers/specs/2026-09-06-pi-mindvault-prd.md`.
-
-## Privacy
-Local-only by default. Redacts tokens/keys, jails outside-cwd paths as `<outside-cwd>`. Delete anytime. Docs/commits never contain absolute paths or usernames (`~/.pi`, `<user>` only).
-
-## M1 scope (this plan)
-- FTS5-only search (no vectors yet — M2 adds `sqlite-vec` + RRF).
-- `memory_context` is extractive in M1; LLM synthesis lands in M3.
-- Queue table exists for M3 workers; M1 writes synchronously.
-
-## M2 scope
-- RRF hybrid recall (`vec` + FTS5, recency/importance/explicit rerank); `vec0` when the native extension loads, JS cosine scan otherwise.
-- Embeddings pluggable: zero-dep feature-hash default; set `MINDVAULT_EMBEDDINGS_URL/KEY/MODEL/DIM` for API embeddings.
-- `memory_forget` + scope delete (session delete lands in M3 with workers).
-
-## M3 scope
-- Async ingest: turns buffered to `messages` + queue; heuristic Deriver (no LLM) extracts `episodic` facts; poison jobs fail after 3 attempts.
-- Extractive session summaries + 40/60 budgeted prompt context; post-turn auto-sync (bounded, best-effort).
-- Session lifecycle helpers + cascade delete. LLM-backed Deriver/Dreamer stay M4.
+`/memory` shows which embedder is actually in use, e.g. `emb=local:fast-bge-small-en-v1.5` (semantic model active) or `emb=feature-hash`, with `unavailable→feature-hash` if `local` is selected but the runtime can't load.
 
 ## Maintain
-- `memory_optimize` tool (or run `dream` / `memory-prune <scope>` commands): checkpoint + FTS rebuild + backfill + Dreamer + expiry prune + vacuum. Slow on large DBs — run idle.
-- `/memory` shows recall hit-rate (`recall-hit=82% of 50`) to tune thresholds.
-- Explicit memories and `global` identity facts never decay; everything else follows the 30-day low-importance episodic policy.
+- `/memory` shows a quick status line, including recall hit-rate (`recall-hit=82% of 50`).
+- `/dream` (or the `memory_optimize` tool) consolidates duplicates, prunes stale memory, and compacts the database. Run it when idle; it can be slow on large vaults.
+- Explicit saves and `global` identity facts never decay. Everything else follows a decay policy (stale, low-value, unused memories are pruned), and a size cap keeps the vault fast.
 
-## Install for real
-```bash
-pi install npm:@rs25-labs/pi-mindvault
-```
-Then `/mindvault-setup` inside pi. Requires pi with extension support and Node 22+.
-
-## Releasing (maintainers)
-First publish must be manual (tokens/CLI cannot complete it): publish `0.1.0` publicly
-via staged publish + browser approval. Only then does the package get a Settings page.
-Trusted Publisher (OIDC) is configured on the *package* Settings page — not account
-settings, which has no such option. Add repo `rs25-labs/pi-mindvault`, workflow
-`publish.yml`. After that, every release is just a `v*` tag; the Action tests,
-typechecks, and publishes with provenance. No tokens involved.
+## Privacy
+Local-only by default. Secrets and tokens are redacted before storage, and absolute paths outside your working directory are jailed as `<outside-cwd>`. Delete any memory, or a whole scope, at any time.
