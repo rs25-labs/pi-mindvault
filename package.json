@@ -1,6 +1,6 @@
 {
   "name": "@rs25-labs/pi-mindvault",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local-first sqlite memory for pi — Hermes durability, Honcho-style recall, no server.",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/rs25-labs/pi-mindvault.git" },
@@ -18,7 +18,7 @@
     "image": "https://raw.githubusercontent.com/rs25-labs/pi-mindvault/main/preview.png"
   },
   "scripts": {
-    "test": "tsx --test tests/*.test.ts",
+    "test": "MINDVAULT_CONFIG_PATH=tests/.absent-config.json tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

@@ -4,6 +4,7 @@
 import type { Db } from "./db.ts";
 import { featureHash, activeEmbedder } from "./embeddings.ts";
 import { vecMode } from "./vec.ts";
+import { loadConfig } from "./config.ts";
 
 export interface DreamStats { merged: number; pruned: number; cards: number }
 
@@ -18,8 +19,7 @@ function cos(a: Float32Array, b: Float32Array): number {
 }
 
 export function maxObs(): number {
-  const n = Number(process.env.MINDVAULT_MAX_OBS ?? "50000");
-  return Number.isFinite(n) && n > 0 ? n : 50000;
+  return loadConfig().maxObs;
 }
 
 export function dream(db: Db, _opts: Record<string, never>): DreamStats {

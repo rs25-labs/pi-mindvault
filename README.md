@@ -47,15 +47,23 @@ Tools (for agents):
 Config (`recallMode: hybrid|context|tools`, `writeFrequency: async|turn|session|N`, `sessionStrategy: per-directory|per-repo|per-session|global`). Set `MINDVAULT_QUIET=1` to suppress the passive per-session status banner.
 
 ## Embeddings
-Recall quality depends on the embedding provider, selected with `MINDVAULT_EMBEDDINGS_PROVIDER`:
+The default (`hash`) needs no setup. To change the provider, use `/mindvault-config` — no environment variables required. Settings persist in `~/.pi/memory/config.json`.
+
+```text
+/mindvault-config                     # show current config
+/mindvault-config embeddings local    # switch to the on-device semantic model
+/mindvault-config embeddings hash     # back to the default
+```
 
 | Provider | Footprint | Private | Notes |
 |----------|-----------|---------|-------|
 | `hash` (default) | none, bundled | yes | zero-dependency feature-hash; lexical, offline |
-| `local` | model (~23MB+) downloaded on first use; runtime is an optional dependency | yes | best recall, offline; set `MINDVAULT_EMBEDDINGS_MODEL` |
-| `api` | none | no (leaves the machine) | set `MINDVAULT_EMBEDDINGS_URL` (https), `_KEY`, `_MODEL`, `_DIM` |
+| `local` | model (~tens of MB) downloaded on first use; runtime is an optional dependency | yes | best recall, offline; `/mindvault-config embeddings local` fills in model + dim |
+| `api` | none | no (leaves the machine) | set `url`/`key`/`model`/`dim` under `embeddings` in `config.json` |
 
-`local` uses `fastembed` (declared under `optionalDependencies`, so a default install pulls nothing extra). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+`local` uses `fastembed` (an `optionalDependency`, so a default install pulls nothing extra) — install it once in the package dir when prompted (`npm install fastembed`). If the runtime or model is unavailable, embeddings fall back to `hash` and recall keeps working. Switching providers re-embeds lazily; new writes embed asynchronously (the Deriver/optimize path), so vector recall for a just-written memory is eventually consistent while FTS covers it immediately.
+
+Every `MINDVAULT_*` environment variable still works as an optional override for scripted/CI use, but is never required.
 
 ## How it works
 - Hermes pattern: single sqlite, WAL, FTS5 external-content + triggers, chunked rebuild, fail-open detach.

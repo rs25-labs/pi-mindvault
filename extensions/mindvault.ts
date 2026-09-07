@@ -3,8 +3,11 @@ import { Type } from "typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openMindvault, remember, recallSearch, getProfile, dbStatus, forgetObservation, markUsed, embedUpgrade, explainObservation, editObservation, seedVault } from "./lib/db.ts";
-import { embed, isAsyncProvider } from "./lib/embeddings.ts";
+import { embed, isAsyncProvider, setActiveEmbedder } from "./lib/embeddings.ts";
+import { loadConfig, writeConfig, type MindvaultConfig } from "./lib/config.ts";
 import { scopeKeysForRead, resolveScope, gitRootSync } from "./lib/scopes.ts";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { ingestMessage, drainQueue, queueStatus } from "./lib/worker.ts";
 import { buildContext } from "./lib/context.ts";
 import { optimizeNow } from "./lib/maint.ts";
@@ -15,9 +18,15 @@ function dbPath(): string {
   return join(homedir(), ".pi", "memory", "memory.db");
 }
 
+const pkgDir = dirname(dirname(fileURLToPath(import.meta.url)));
+
+async function fastembedAvailable(): Promise<boolean> {
+  try { const spec = "fastembed"; await import(spec); return true; } catch { return false; }
+}
+
 export default function (pi: ExtensionAPI) {
   const getDb = () => openMindvault(dbPath());
-  const quiet = process.env.MINDVAULT_QUIET === "1";
+  const quiet = loadConfig().quiet;
   const ctxScopes = (cwd: string) => {
     const repo = gitRootSync(cwd);
     return scopeKeysForRead({ cwd, repoRoot: repo });
@@ -263,6 +272,46 @@ function flattenContent(content: unknown): string {
       const st = dbStatus(db);
       db.close();
       ctx.ui.notify(`mindvault ready (schema ${st.schemaVersion}, ${st.observations} memories, ${seeded.peers} peers, ${seeded.scopes} scopes)`, "info");
+    },
+  });
+
+  pi.registerCommand("mindvault-config", {
+    description: "View or set config (embeddings <hash|local|api>, quiet <on|off>, maxObs <n>) — no env vars needed",
+    handler: async (args, ctx) => {
+      const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) {
+        const c = loadConfig();
+        ctx.ui.notify(`config: embeddings=${c.embeddings.provider}${c.embeddings.model ? ` (${c.embeddings.model})` : ""} quiet=${c.quiet} maxObs=${c.maxObs}`, "info");
+        return;
+      }
+      const [key, value] = parts;
+      if (key === "embeddings") {
+        const p = (value ?? "").toLowerCase();
+        if (p !== "hash" && p !== "local" && p !== "api") { ctx.ui.notify("usage: /mindvault-config embeddings <hash|local|api>", "error"); return; }
+        const embeddings: MindvaultConfig["embeddings"] = { provider: p };
+        if (p === "local") { embeddings.model = "BAAI/bge-small-en-v1.5"; embeddings.dim = 384; }
+        writeConfig({ embeddings });
+        setActiveEmbedder(null); // clear cached embedder so a later open in this session re-reads config
+        let extra = " — takes effect next session";
+        if (p === "local") extra += (await fastembedAvailable()) ? "; model downloads on first use" : `; first run: (cd ${pkgDir} && npm install fastembed)`;
+        if (p === "api") extra += "; set url/key/model/dim in config.json or MINDVAULT_EMBEDDINGS_* env";
+        ctx.ui.notify(`embeddings set to ${p}${extra}`, "info");
+        return;
+      }
+      if (key === "quiet") {
+        const on = value === "on" || value === "true" || value === "1";
+        writeConfig({ quiet: on });
+        ctx.ui.notify(`quiet ${on ? "on" : "off"} — takes effect next session`, "info");
+        return;
+      }
+      if (key === "maxobs" || key === "maxobservations") {
+        const n = Number(value);
+        if (!(n > 0)) { ctx.ui.notify("usage: /mindvault-config maxObs <positive number>", "error"); return; }
+        writeConfig({ maxObs: n });
+        ctx.ui.notify(`maxObs set to ${n} — takes effect next session`, "info");
+        return;
+      }
+      ctx.ui.notify("usage: /mindvault-config [embeddings <hash|local|api> | quiet <on|off> | maxObs <n>]", "error");
     },
   });
 

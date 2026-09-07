@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 — 2026-09-06
+- Config file: `~/.pi/memory/config.json` (set via `/mindvault-config`) now drives the
+  embedding provider, quiet mode, and size cap — no environment variables required.
+  Env vars remain supported as optional overrides.
+- New `/mindvault-config` command: `embeddings <hash|local|api>`, `quiet <on|off>`,
+  `maxObs <n>`; choosing `local` fills in the correct model (`BAAI/bge-small-en-v1.5`)
+  and dim (384), and reports if `fastembed` still needs installing.
+- Fix: local provider default model id corrected to `BAAI/bge-small-en-v1.5`.
+
 ## 0.2.1 — 2026-09-06
 - Setup: `/mindvault-setup` now seeds the `user`/`pi-agent` peers and `global` + current
   directory scopes (previously it only reported status), so a fresh vault is complete on
