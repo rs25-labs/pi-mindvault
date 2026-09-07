@@ -1,3 +1,5 @@
+import { loadConfig } from "./config.ts";
+
 export interface Embedder { readonly dim: number; readonly name: string; embed(text: string): Promise<Float32Array>; }
 
 function fnv1a(str: string): number {
@@ -82,13 +84,9 @@ export class LocalEmbedder implements Embedder {
 }
 
 export function defaultEmbedder(): Embedder {
-  const provider = (process.env.MINDVAULT_EMBEDDINGS_PROVIDER ?? "").toLowerCase();
-  const base = process.env.MINDVAULT_EMBEDDINGS_URL ?? "";
-  const key = process.env.MINDVAULT_EMBEDDINGS_KEY ?? "";
-  const model = process.env.MINDVAULT_EMBEDDINGS_MODEL ?? "";
-  const dim = Number(process.env.MINDVAULT_EMBEDDINGS_DIM ?? "0");
-  if (provider === "local") return new LocalEmbedder(dim > 0 ? dim : 384, model || "fast-bge-small-en-v1.5");
-  if ((provider === "api" || !provider) && base && key && model && dim > 0) return new ApiEmbedder(dim, base, key, model);
+  const c = loadConfig().embeddings;
+  if (c.provider === "local") return new LocalEmbedder(c.dim && c.dim > 0 ? c.dim : 384, c.model || "BAAI/bge-small-en-v1.5");
+  if (c.provider === "api" && c.url && c.key && c.model && c.dim && c.dim > 0) return new ApiEmbedder(c.dim, c.url, c.key, c.model);
   return new FeatureHashEmbedder(256);
 }
 
